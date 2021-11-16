@@ -1,0 +1,92 @@
+job_type: cg
+
+config:
+  bundle_size: 1
+  cframe:     25000
+
+  jobbin:     "autobind-12 cganalysis"
+  jobname:    cganalysis
+  jobdesc:    CGAnalysis ({}).
+
+  nnodes:     1
+  nprocs:     1
+  cores per task:     3 # 3 summit use 5 on lassen
+  ngpus:      1
+
+  # remove these
+  wrapper:    ''
+  #wrapper:        '$MUMMI_CODE/setup/run_ddcMD.sh'
+
+  use_broker: True
+
+  addtl_args:
+    mpi: spectrum
+
+imports:  # possibly needed for any evals
+  - mummi_ras
+
+variables:
+  simname: null # value supplied by jobTracker
+  timestamp: null # value supplied by jobTracker
+  locpath:
+    - eval: mummi_ras.Naming.dir_local()
+    - /cg_{timestamp}
+  outpath:
+  - eval: mummi_ras.Naming.dir_sim('aa', '{simname}')
+
+script: |
+
+  module load spectrum-mpi/10.3.1.2-20200121
+
+  # set up the run
+  nnodes=1
+  nprocs=1
+  ncores=3
+  simname={simname}
+  outpath={outpath}
+  locpath={locpath}
+
+  echo ">> simname = $simname"
+  echo ">> outpath = $outpath"
+  echo ">> locpath = $locpath"
+
+  # prepare the run
+  mkdir -p $locpath; cd $locpath
+
+  cp $outpath/ConsAtom.data                         $locpath/
+  cp $outpath/martini.data                          $locpath/
+  cp $outpath/molecule.data                         $locpath/
+  cp $outpath/object.data                           $locpath/
+  cp $outpath/restraint.data                        $locpath/
+  cp $outpath/topol.tpr                             $locpath/
+  cp $outpath/lipids-water-eq4.gro                  $locpath/
+  cp $outpath/POPX_Martini_v2.0_lipid.itp           $locpath/
+  cp $outpath/resItpList                            $locpath/
+
+  cp -P $outpath/restart                            $locpath/
+  cp -r $(dirname `readlink -f $outpath/restart`)   $locpath/
+
+  rs=`readlink -f $locpath/restart`
+  sname=`basename $(dirname $rs)`
+
+  # launch the command
+  $(LAUNCHER) "autobind-12 cganalysis \
+    --nprocs 3 \
+    -c \
+    --d 2 \
+    --simname {simname} \
+    --simbin ddcMD \
+    --siminputs {outpath} \
+    --pathremote {outpath} \
+    --path {locpath} \
+    --fstype mummi \
+    --fbio mummi \
+    --frameProcessBatchSize 5 \
+    --fbpath $MUMMI_ROOT/feedback-aa \
+
+    --fcount 25000 \
+    --step 1 \
+    >> cg_analysis.out 2>&1
+
+  # copy the logs
+  cp $locpath/*.log $outpath/

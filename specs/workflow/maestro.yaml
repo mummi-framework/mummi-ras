@@ -1,0 +1,9 @@
+# settings for maestro
+maestro:
+  env:
+  config:
+  batch:
+    type:    flux
+    host:    summit
+    args:
+        mpi: spectrum   

@@ -1,0 +1,24 @@
+
+LOGLEVEL: 2
+INTERVAL_SECS: 120
+JOB_NAMES_2_COUNT: 
+  - createsim-
+  - cganalysis
+  - backmappin 
+  - aaanalysis
+JOB_NAMES_2_TRACK: 
+  - wfmanager.
+  - gridsim2dr
+  - redis
+
+FIRST_KILL_CLEANUP_SECS: 1800
+SECOND_KILL_CLEANUP_SECS: 900
+
+FIRST_KILL_NAMES: 
+  - wfmanager.
+  - gridsim2dr
+
+SECOND_KILL_NAMES: 
+  - redis
+  - aaanalysis
+  - cganalysis

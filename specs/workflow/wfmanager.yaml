@@ -1,0 +1,77 @@
+# settings for wfmanager
+wfmanager:
+  env:
+
+  config:
+    # --------------------------------------------------------------------------
+    # different run modes
+    is_gc: 1
+    do_patchcreation:   1
+    do_workflow:        1
+    do_schedulejobs:    1
+
+    do_patchselection:  1
+    do_feedback_cg2mc:  1
+
+    do_cgselection:     1
+    do_feedback_aa2cg:  1
+
+    #do_cold_restart:    0
+    #do_recovery:        ''
+    #                    #'/p/gpfs1/splash/splash_run4/sims/sim_times_run_lassen_r1.out'
+
+    # --------------------------------------------------------------------------
+    # what type of file system to use (valid values: 'simple' / 'taridx / dbr / mummi')
+    iotype:           mummi
+    fbtype:           mummi
+
+    # --------------------------------------------------------------------------
+    # resource description
+    portion_csim:         0.5 #.8 # 0.6    # 0.8 -- after a day of running
+    portion_cg:           0.5 #.8  # 0.8    # 0.8
+
+    # --------------------------------------------------------------------------
+    fbcg_do_wts:          1
+
+    fbaa_hvr_th:          0.25   #TODO: check if Fikret wants to change these!
+    fbaa_crd_th:          0.2    #0.1975  # Suggested range 0.2-0.3
+    fbaa_frame_increment: 25000  #2000  #50000 -- 2000 is a test value to accelerate fb
+
+    # --------------------------------------------------------------------------
+    # number of seconds per iteration
+    # if a loop finished sooner, it will wait to match the frequency
+    nSecPerIterPC:        5   #30 # Once initial data consumed, try to match output of macro model
+    nSecPerIterWF:        5   #15
+
+    nSecPerCgSelUpdate:   100 # 500 nodes this is ok but should be reduesed for 100 i.e. go to 60
+
+    # TODO: should match with the reload_freq in macro code
+    nSecPerMacroFeedback: 600
+    nSecPerCGFeedback:    600
+
+    # --------------------------------------------------------------------------
+    # how much max work to do per iteration
+    nReadPatchesPerIter:            4     # this is  patches per GC
+                                          # 3300    #990  # number of macro patches to be read
+    nReadCGFramesPerIter:           200   # number of CG patches to be added per run  # NOT USED
+    nMaxPatchesSelectionsPerIter:   200    #100 # max number of macro patches to be selected per iter
+    nMaxCGFramesSelectionsPerIter:  50    #50  # max number of CG frames to be selected per iter
+    nMaxJobsPerIter:                500   #7000  #1200  #400, 200  # max number of jobs to schedule per iter
+
+    # to prevent building a stale patch selection, slow down patch selection
+    # should roughly be the same as the number of resources for each
+    nMaxSelectedPatchBuffer:      600  # 98   # This is also the max number of creatsims at any given time  # 60,  420 # 500nodes, 200   # We will scale this up at scale (near the end)
+    nMaxSelectedCGFrameBuffer:    400   # 280  # 500nodes, 100
+
+    # --------------------------------------------------------------------------
+    jobname:     wfmanager
+    workspace:   ''     # to be read from config.yaml
+
+    log_mem_usage: 1
+    loglevel:   1       # When stable, change to 2
+    logpath:    ''      # empty logpath will use SPLASH_ROOT/workspace
+
+    logfile:    0       # whether to write log to file
+    logstdout:  1       # whether to write log to stdout
+                            # not a good idea to use both!
+# ------------------------------------------------------------------------------

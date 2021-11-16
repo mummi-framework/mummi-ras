@@ -1,0 +1,49 @@
+job_type: aa
+
+config:
+  bundle_size: 1
+
+  jobbin:     aaanalysis
+  jobname:    aaanalysis
+  jobdesc:    AAAnalysis ({}).
+
+  nnodes:     1
+  nprocs:     1
+  cores per task:    3 # 3 summit use 5 on lassen
+  ngpus:      1
+
+  use_broker: True
+
+  addtl_args:
+    mpi: spectrum
+
+imports: # possibly needed for any evals
+  - mummi_ras
+
+variables:
+  simname: null # value supplied by jobTracker
+  timestamp: null # value supplied by jobTracker
+  locpath:
+    - eval: mummi_ras.Naming.dir_local()
+    - /aa-{timestamp}
+
+  outpath:
+    eval: mummi_ras.Naming.dir_sim('aa', '{simname}')
+
+  outfile: 'aa_analysis.out'
+
+
+script: |
+  mkdir -p {outpath}
+  mkdir -p {locpath}; cd {locpath}
+
+  $(LAUNCHER) sh -c aa_analysis \
+    --fstype mummi \
+    --fbio mummi \
+    --fbpath $MUMMI_ROOT/feedback-aa
+    --simname {simname} \
+    --fcount 0
+    --step 1
+    >> {outfile} 2>&1
+  
+  wait

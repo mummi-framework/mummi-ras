@@ -1,0 +1,21 @@
+# centralized configurations
+
+# ------------------------------------------------------------------------------
+local_dir:    /var/tmp/mummi
+
+# ------------------------------------------------------------------------------
+ml:
+  macro:
+    selection:        'importance'
+    min_rand_b4_importance: 10
+    min_cands_b4_sel:       100
+    buffer_sz:              35000
+    #encoder:     'model-metric__model6_metric__c14_z9-2020-12-20-19-25-43'
+    encoder:     'model-metric__model6_metric__c14_z9-n60_t2021-07-14-16-08-48_h718306'
+
+  cg:
+    selection:  'importance'
+    novelty_factor:    .2
+    min_cands_b4_sel:  100
+
+# ------------------------------------------------------------------------------

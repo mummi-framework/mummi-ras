@@ -1,0 +1,59 @@
+job_type: backmapping
+
+config:
+  jobbin:         backmapping
+  jobname:        backmapping
+  jobdesc:        Backmapping ({})
+
+  nnodes:         1
+  nprocs:         1
+  cores per task:         24
+  walltime:       '04:00:00'
+
+dir_sim: aa
+
+variables:
+  simname: null # value supplied by jobTracker
+  timestamp: null # value supplied by jobTracker
+  patch: 
+    eval: Naming.cgframe_parse('{simname}')[0]
+
+  frame: 
+    eval: Naming.cgframe_parse('{simname}')[1]
+
+  outfile: 'backmapping.out'
+
+  inpath: 
+    eval: Naming.dir_sim('cg', '{patch}')
+
+  outpath: 
+    eval: Naming.dir_sim('aa', '{simname}')
+
+  locpath: 
+    - eval: Naming.dir_local()
+    - /backmapping_{timestamp}
+
+script: |
+  source $SPACK_ROOT/share/spack/setup-env.sh
+  spack load -r gromacs@2019.6.mummifix+double
+  spack load -r gromacs@2019.6.mummifix~double
+  which gmx\nwhich gmx_d
+
+  patch={patch}
+  frame={frame}
+  simname={simname}
+  inpath={inpath}
+  outpath={outpath}
+  locpath={locpath}
+  mkdir -p $locpath; cd $locpath
+
+  backmapping \
+    --fstype   mummi \
+    --patch_id $patch \
+    --frame_id $frame \
+    --inpath   $inpath \
+    --outpath  $outpath \
+    --outlocal $locpath \
+    --logpath  $locpath \
+    --loglevel 2 \
+    >> {outfile} 2>&1

@@ -1,0 +1,49 @@
+job_type: createsim
+
+config:
+  jobbin:         createsim
+  jobname:        createsim
+  jobdesc:        CreateSim ({})
+
+  nnodes:         1
+  nprocs:         1
+  cores per task:         24
+  walltime:       '04:00:00'
+
+imports: # possibly needed for any evals
+  - mummi_ras
+
+dir_sim: cg
+
+variables:
+  simname: null # value supplied by jobTracker
+  timestamp: null # value supplied by jobTracker
+  locpath:
+    - eval: mummi_ras.Naming.dir_local()
+    - /createsim_{timestamp}
+  inpath: $MUMMI_ROOT/patches
+
+  outpath:
+    eval: mummi_ras.Naming.dir_sim('cg', '{simname}')
+
+  outfile: 'createsims.out'
+
+script: |
+  mkdir -p {outpath}
+  mkdir -p {locpath}; cd {locpath}
+
+  # analysis command
+  # finalize the two!
+  $(LAUNCHER) sh -c createsim \
+    --fstype mummi \
+    --patch {simname} \
+    --inpath {inpath} \
+    --outpath {outpath} \
+    --logpath {locpath} \
+    --loglevel 1 \
+    --gromacs gmx \
+    --mpi "autobind-24 gmx mdrun" \
+    --mdrunopt " -rdd 2.0 -ntomp 4 -dd 4 3 2 -nt 96" \
+    >> {outfile} 2>&1
+
+  wait
