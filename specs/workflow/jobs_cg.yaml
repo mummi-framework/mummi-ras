@@ -10,15 +10,10 @@ config:
 
   nnodes:     1
   nprocs:     1
-  cores per task:     3 # 3 summit use 5 on lassen
+  cores per task: 3 # 3 summit use 5 on lassen
   ngpus:      1
 
-  # remove these
-  wrapper:    ''
-  #wrapper:        '$MUMMI_CODE/setup/run_ddcMD.sh'
-
   use_broker: True
-
   addtl_args:
     mpi: spectrum
 
@@ -28,29 +23,31 @@ imports:  # possibly needed for any evals
 variables:
   simname: null # value supplied by jobTracker
   timestamp: null # value supplied by jobTracker
-  locpath:
-    - eval: mummi_ras.Naming.dir_local()
-    - /cg_{timestamp}
   outpath:
-  - eval: mummi_ras.Naming.dir_sim('aa', '{simname}')
+    eval: mummi_ras.Naming.dir_sim('cg', '{simname}')
+  locpath:
+    eval: mummi_ras.Naming.dir_local('cg/{simname}')
+  fbpath:
+    eval: mummi_ras.Naming.dir_root('feedback-cg')
+  outfile: 'cg_analysis.out'
 
 script: |
-
-  module load spectrum-mpi/10.3.1.2-20200121
 
   # set up the run
   nnodes=1
   nprocs=1
   ncores=3
+
   simname={simname}
   outpath={outpath}
   locpath={locpath}
+  fbpath={fbpath}
 
   echo ">> simname = $simname"
   echo ">> outpath = $outpath"
   echo ">> locpath = $locpath"
+  echo ">> fbpath  = $fbpath"
 
-  # prepare the run
   mkdir -p $locpath; cd $locpath
 
   cp $outpath/ConsAtom.data                         $locpath/
@@ -66,27 +63,18 @@ script: |
   cp -P $outpath/restart                            $locpath/
   cp -r $(dirname `readlink -f $outpath/restart`)   $locpath/
 
+  # NOTE: changed to avoid curly brace collision
   rs=`readlink -f $locpath/restart`
   sname=`basename $(dirname $rs)`
+  snum=$(echo $sname | cut -f2 -d".")
 
-  # launch the command
-  $(LAUNCHER) "autobind-12 cganalysis \
-    --nprocs 3 \
-    -c \
-    --d 2 \
-    --simname {simname} \
-    --simbin ddcMD \
-    --siminputs {outpath} \
-    --pathremote {outpath} \
-    --path {locpath} \
-    --fstype mummi \
-    --fbio mummi \
-    --frameProcessBatchSize 5 \
-    --fbpath $MUMMI_ROOT/feedback-aa \
+  if [ -n "$snum" ] && [ "$snum" -eq "$snum" ] 2>/dev/null; then
+    cframe=`expr $snum + 25000`
+  else
+    cframe=25000
+  fi
+  $(LAUNCHER) sh -c "autobind-12 cganalysis  -c  -d 2 --simname $simname  --pathremote $outpath  --path $locpath  --fstype mummi  --fbio mummi  --maxsimtime 250000000  --frameProcessBatchSize 5  --simbin ddcMD_GPU  --siminputs $outpath  --fcount $cframe  --nprocs 3 >> {outfile} 2>&1"
 
-    --fcount 25000 \
-    --step 1 \
-    >> cg_analysis.out 2>&1
-
-  # copy the logs
+  wait
   cp $locpath/*.log $outpath/
+

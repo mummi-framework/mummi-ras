@@ -6,12 +6,23 @@
 
 """Contains definitions of all lipids both Martini CG and CHARMM AA."""
 
+import os
 import logging
 import MDAnalysis
 import numpy
-import os
 
 LOGGER = logging.getLogger(__name__)
+
+# allow grabbing the lipid defs without mummi environment
+try:
+    from mummi_core.utils import Naming
+    RES_PATH = Naming.dir_res('martini')
+
+except ModuleNotFoundError as e:
+
+    RES_PATH = os.path.join(os.environ['MUMMI_RESOURCES'], 'martini')
+    LOGGER.error(f'Failed to import MuMMI. Will read lipid defs from ({RES_PATH})')
+
 
 # Define all lipids
 lipidTypeList = []
@@ -39,10 +50,10 @@ lipidGroup = ["CHOL", "PC", "PE", "SM", "PS", "Glyco", "PI", "PA", "PIPs", "CER"
 
 if version == 1:
     LIPID_DEFS = \
-        os.path.join(Naming.dir_res('martini'), "lipiddefs/lipiddefs_v1.0.2.csv")
+        os.path.join(RES_PATH, "lipiddefs/lipiddefs_v1.0.2.csv")
 else:
     LIPID_DEFS = \
-        os.path.join(Naming.dir_res('martini'), "lipiddefs/lipiddefs_v0.0.2.csv")
+        os.path.join(RES_PATH, "lipiddefs/lipiddefs_v0.0.2.csv")
 
 class LipidType():
     """Lipid type object - parses the lipid type string and knows what the lipid type is."""

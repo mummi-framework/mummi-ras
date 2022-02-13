@@ -7,37 +7,36 @@ config:
 
   nnodes:         1
   nprocs:         1
-  cores per task:         24
+  cores per task: 24
   walltime:       '04:00:00'
+
+imports: # possibly needed for any evals
+  - mummi_ras
 
 dir_sim: aa
 
 variables:
   simname: null # value supplied by jobTracker
   timestamp: null # value supplied by jobTracker
-  patch: 
-    eval: Naming.cgframe_parse('{simname}')[0]
-
-  frame: 
-    eval: Naming.cgframe_parse('{simname}')[1]
-
+  patch:
+    eval: mummi_ras.Naming.cgframe_parse('{simname}')[-2]
+  frame:
+    eval: mummi_ras.Naming.cgframe_parse('{simname}')[-1]
+  inpath:
+    eval: mummi_ras.Naming.dir_sim('cg', '{patch}')
+  outpath:
+    eval: mummi_ras.Naming.dir_sim('aa', '{simname}')
+  locpath:
+    eval: mummi_ras.Naming.dir_local('backmapping/{simname}')
   outfile: 'backmapping.out'
 
-  inpath: 
-    eval: Naming.dir_sim('cg', '{patch}')
-
-  outpath: 
-    eval: Naming.dir_sim('aa', '{simname}')
-
-  locpath: 
-    - eval: Naming.dir_local()
-    - /backmapping_{timestamp}
-
 script: |
+
   source $SPACK_ROOT/share/spack/setup-env.sh
   spack load -r gromacs@2019.6.mummifix+double
   spack load -r gromacs@2019.6.mummifix~double
-  which gmx\nwhich gmx_d
+  which gmx
+  which gmx_d
 
   patch={patch}
   frame={frame}
@@ -45,6 +44,12 @@ script: |
   inpath={inpath}
   outpath={outpath}
   locpath={locpath}
+
+  echo ">> simname = $simname"
+  echo ">> inpath  = $inpath"
+  echo ">> outpath = $outpath"
+  echo ">> locpath = $locpath"
+
   mkdir -p $locpath; cd $locpath
 
   backmapping \
@@ -55,5 +60,5 @@ script: |
     --outpath  $outpath \
     --outlocal $locpath \
     --logpath  $locpath \
-    --loglevel 2 \
+    --loglevel 1 \
     >> {outfile} 2>&1

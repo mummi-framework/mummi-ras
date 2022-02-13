@@ -139,9 +139,9 @@ class WFManager():
             self.flux = flux_uri()
             LOGGER.info(f'Identified flux_uri = [{self.flux}]')
             if self.flux == '':
-                LOGGER.error('Failed to identify flux uri')
-                LOGGER.error('Disabling job scheduling')
+                LOGGER.error('Failed to identify flux uri. Disabling job scheduling')
                 self.do_schedulejobs = False
+                assert False, 'Failed to identify flux uri'
 
             # ------------------------------------------------------------------
             # if no workspace has been specified, use the default in hierarchy

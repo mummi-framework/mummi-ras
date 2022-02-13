@@ -387,6 +387,7 @@ class MacroPatchCreator (object):
 
             snapshot_name, filenames = MacroParser.get_filenames(fidx)
             tag = f'({inpath})/({snapshot_name})'
+            LOGGER.debug(f'Reading {tag}...')
 
             try:
                 st = Timer()
@@ -408,6 +409,12 @@ class MacroPatchCreator (object):
                     MacroParser.parse_snapshot_from_streams(data[0], data[1], data[2], sim_name=sim_name)
 
                 LOGGER.debug(f'Parsed {tag} {st}')
+                del data
+                #del data[0]
+                #del data[1]
+                #del data[2]
+                #data = None
+                LOGGER.debug(f'Freed read data')
 
                 patch_id = Naming.pfpatch(fidx, sim_name)
                 config = PatchConfig(sim_name, simtime, tunit, lunit,
@@ -497,6 +504,11 @@ class MacroPatchCreator (object):
                     MacroParser.parse_snapshot_from_streams(data[0], data[1], data[2])
 
                 LOGGER.info(f'Parsed ({snapshot_name}) {st}')
+                del data[0]
+                del data[1]
+                del data[2]
+                data = None
+                LOGGER.debug(f'Freed read data')
 
                 assert len(concs.shape) == 3
                 assert concs.shape[0] == MacroPatchCreator.macro_gsz[0]

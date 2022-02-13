@@ -1837,6 +1837,7 @@ def main():
     # Set up the necessary base data structures to begin study set up.
     parser = setup_argparser()
     args = parser.parse_args()
+    print (f'Launching Createsim from {os.getcwd()}: {args}')
 
     global gromacs
     global mdrun_o

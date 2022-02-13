@@ -35,16 +35,16 @@ def read_specs(spath):
     config['wfmanager']['batch']  = maestro['maestro']['batch']
     config['macro_patch_creator'] = pf2pfpatches['macro_patch_creator']
 
-    with open(os.path.join(spath, 'createsim_job.yaml'), 'r') as data:
+    with open(os.path.join(spath, 'jobs_createsim.yaml'), 'r') as data:
         config['createsim']       = yaml.load(data, Loader=yaml.FullLoader)
     
-    with open(os.path.join(spath, 'cg_job.yaml'), 'r') as data:
+    with open(os.path.join(spath, 'jobs_cg.yaml'), 'r') as data:
         config['cg']              = yaml.load(data, Loader=yaml.FullLoader)
     
-    with open(os.path.join(spath, 'backmapping_job.yaml'), 'r') as data:
+    with open(os.path.join(spath, 'jobs_backmapping.yaml'), 'r') as data:
         config['backmapping']     = yaml.load(data, Loader=yaml.FullLoader)
     
-    with open(os.path.join(spath, 'aa_job.yaml'), 'r') as data:
+    with open(os.path.join(spath, 'jobs_aa.yaml'), 'r') as data:
         config['aa']              = yaml.load(data, Loader=yaml.FullLoader)
 
     # --------------------------------------------------------------------------
