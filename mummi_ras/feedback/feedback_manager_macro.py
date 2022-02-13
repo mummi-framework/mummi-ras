@@ -161,7 +161,8 @@ class MacroFeedbackManager(FeedbackManager):
             # ------------------------------------------------------------------
             success_idxs = []
             failed_idxs = []
-            for i in range(nkeys):
+            len_rdfs = len(rdfs)
+            for i in range(len_rdfs):
                 if rdfs[i] is not None:
                     success_idxs.append(i)
                 else:

@@ -166,16 +166,19 @@ class Backmapping (object):
                 LOGGER.info('cp pdb feedback file: {}'.format(pdb_file))
                 shutil.copy(pdb_file, ".")
 
-                if "_CRD_" in pdb_file:
+                if "-CRD_" in pdb_file:
                     # check if HVR feedback and copy
                     #newPDBcopyList = glob.glob("{}/{}_HVR_*[0-9].pdb".format(feedback_aa_dir, pdb_file[0:15]))
                     newPDBcopyList = glob.glob("{}/{}*-HVR_*.pdb".format(feedback_aa_dir, pdb_file[0:15]))
                     LOGGER.info('Copy HVR feedback: {}'.format(newPDBcopyList))
-                elif "_HVR_" in pdb_file:
+                elif "-HVR_" in pdb_file:
                     # check if CRD feedback and copy
                     #newPDBcopyList = glob.glob("{}/{}_CRD_*[0-9].pdb".format(feedback_aa_dir, pdb_file[0:15]))
                     newPDBcopyList = glob.glob("{}/{}*-CRD_*.pdb".format(feedback_aa_dir, pdb_file[0:15]))
                     LOGGER.info('Copy CRD feedback: {}'.format(newPDBcopyList))
+                else:
+                    raise ValueError("A system must support either -CRD or -HVR; invalid system found. Exiting")
+
                 if newPDBcopyList != []:
                     sortList = sorted(newPDBcopyList, key=lambda x: x[-19:-4])
                     newPDBcopy = sortList[-1][0:-4]  # note glob gives full file path

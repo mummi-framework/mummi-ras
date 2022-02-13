@@ -7,7 +7,7 @@ config:
 
   nnodes:         1
   nprocs:         1
-  cores per task:         24
+  cores per task:  24
   walltime:       '04:00:00'
 
 imports: # possibly needed for any evals
@@ -18,28 +18,35 @@ dir_sim: cg
 variables:
   simname: null # value supplied by jobTracker
   timestamp: null # value supplied by jobTracker
-  locpath:
-    - eval: mummi_ras.Naming.dir_local()
-    - /createsim_{timestamp}
-  inpath: $MUMMI_ROOT/patches
-
+  inpath:
+    eval: mummi_ras.Naming.dir_root('macro')
   outpath:
     eval: mummi_ras.Naming.dir_sim('cg', '{simname}')
-
+  locpath:
+    eval: mummi_ras.Naming.dir_local('createsim/{simname}')
   outfile: 'createsims.out'
 
 script: |
-  mkdir -p {outpath}
-  mkdir -p {locpath}; cd {locpath}
 
-  # analysis command
-  # finalize the two!
-  $(LAUNCHER) sh -c createsim \
+  simname={simname}
+  inpath={inpath}
+  outpath={outpath}
+  locpath={locpath}
+
+  echo ">> simname = $simname"
+  echo ">> inpath  = $inpath"
+  echo ">> outpath = $outpath"
+  echo ">> locpath = $locpath"
+
+  mkdir -p $locpath; cd $locpath
+
+  createsim \
     --fstype mummi \
-    --patch {simname} \
-    --inpath {inpath} \
-    --outpath {outpath} \
-    --logpath {locpath} \
+    --patch $simname \
+    --inpath $inpath \
+    --outpath $outpath \
+    --outlocal $locpath \
+    --logpath $locpath \
     --loglevel 1 \
     --gromacs gmx \
     --mpi "autobind-24 gmx mdrun" \

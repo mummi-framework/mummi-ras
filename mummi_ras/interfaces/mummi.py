@@ -457,7 +457,14 @@ class IO_Mummi (IO_Base):
             pool.close()
             pool.join()
             for i, rdf in enumerate(rdfs_list):
-                rdfs[i] = rdf.data
+                if rdf is None:
+                    LOGGER.warning("Found null RDF -- likely file is '%s'", keys[i])
+                    rdfs[i] = None
+                else:
+                    rdfs[i] = rdf.data
+
+            # 2021.09.30: HB removed this again. instead, push a None for the corrupt file!
+            #rdfs = [rdf.data for rdf in rdfs_list if rdf is not None]
 
         LOGGER.info(f'Fetched {len(rdfs)} rdfs using ({intf}) interface. '
                     f'Took {time.time() - t0:.5f} sec')

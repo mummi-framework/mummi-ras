@@ -210,7 +210,7 @@ class MacroParser:
                 break
 
             toks = [_.strip() for _ in re.split('[=;]', line)]
-            assert len(toks) == 3 and toks[2] == '', f'unfamiliar header line in stream {name}: {lidx}: ({line}): ({toks})'
+            assert len(toks) == 3 and toks[2] == '', f'unfamiliar header line in stream {name}: {lidx}: ({type(line)}, {len(line)})'
 
             k, v = toks[0], [_ for _ in toks[1].split(' ') if len(_) > 0]
             header[k] = v[0] if len(v) == 1 else v

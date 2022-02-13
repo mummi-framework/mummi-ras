@@ -1017,6 +1017,7 @@ def aa_analysis(simname, toponame, trajname, trajtype, trajlist,
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
 def main():
+    aasimulation = None
     try:
         # Set up the necessary base data structures to begin study set up.
         parser = setup_argparser()
@@ -1096,7 +1097,8 @@ def main():
 
     finally:
         LOGGER.info("When going down in a finally stop all simulations")
-        aasimulation.stop()
+        if aasimulation is None:
+            aasimulation.stop()
 
     # --------------------------------------------------------------------------
     '''
