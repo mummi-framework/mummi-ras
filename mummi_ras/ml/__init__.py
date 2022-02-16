@@ -3,4 +3,3 @@
 # ------------------------------------------------------------------------------
 from .patchSelector import PatchSelector
 from .cgSelector import CGSnapshot, CGSelector, CGSelectorType
-from .dynim import *
