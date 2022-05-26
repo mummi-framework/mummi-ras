@@ -17,11 +17,20 @@ from mummi_ras.workflow.wfmanager import WFManager
 from logging import getLogger
 LOGGER = getLogger(__name__)
 
+## recursive flux scheduling is requiring reset of the TMPDIR
+## https://github.com/flux-framework/flux-core/issues/4328
+## https://github.com/flux-framework/flux-core/issues/4329
+
+## TODO: this should be set from the script that launches the job
+tmpdir = '/tmp'
+os.makedirs(tmpdir, exist_ok = True)
+os.environ["TMPDIR"] = tmpdir
 
 # ------------------------------------------------------------------------------
 def read_specs(spath):
 
     # read the specs
+    LOGGER.info(f'Reading specs from ({spath})')
     with open(os.path.join(spath, 'wfmanager.yaml'), 'r') as data:
         wfmngr = yaml.load(data, Loader=yaml.FullLoader)
 
@@ -57,6 +66,7 @@ def read_specs(spath):
 
     config['macro_patch_creator']['params']['sim2frame'] = {s: 1 for s in simlist}
     print(f'> Updated sim2frame: {config["macro_patch_creator"]["params"]}')
+
     # --------------------------------------------------------------------------
     return config
 
@@ -70,8 +80,7 @@ def term_wrapper(job):
 
 
 # ------------------------------------------------------------------------------
-if __name__ == '__main__':
-
+def main():
     # --------------------------------------------------------------------------
     hostname = mummi_core.get_hostname(contract_hostname=False)
     print(f'Launching workflow manager on ({hostname})')
@@ -110,5 +119,11 @@ if __name__ == '__main__':
         traceback.print_exc()
         #job.stop()
         exit(1)
+
+
+# ------------------------------------------------------------------------------
+if __name__ == '__main__':
+    main()
+
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------

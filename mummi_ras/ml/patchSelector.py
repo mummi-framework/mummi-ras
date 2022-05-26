@@ -12,7 +12,11 @@ from mummi_ras.datastructures.patch import pfPatchType, gcPatchType
 from mummi_ras.datastructures.patch import Patch as pfPatch
 from mummi_ras.interfaces import get_io
 
-import dynim
+if __package__ or "." in __name__:
+    from . import dynim
+else:
+    import dynim
+
 from .model_pretrained import PretrainedModel as PatchEncoder
 
 LOGGER = logging.getLogger(__name__)

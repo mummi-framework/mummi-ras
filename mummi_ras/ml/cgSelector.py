@@ -15,7 +15,10 @@ from mummi_ras.datastructures.cgSnapshot import CGSnapshot
 from mummi_ras.interfaces import get_io
 from mummi_core.utils.utilities import sig_ign_and_rename_proc
 
-import dynim
+if __package__ or "." in __name__:
+    from . import dynim
+else:
+    import dynim
 
 
 LOGGER = logging.getLogger(__name__)

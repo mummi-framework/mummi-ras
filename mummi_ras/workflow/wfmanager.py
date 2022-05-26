@@ -136,9 +136,13 @@ class WFManager():
 
             # ------------------------------------------------------------------
             # identify scheduler interface
-            self.flux = flux_uri()
-            LOGGER.info(f'Identified flux_uri = [{self.flux}]')
-            if self.flux == '':
+            LOGGER.info(f'Workflow launched on host: {mummi_core.get_hostname()}')
+
+            self.flux = flux_uri(override_uri=False)
+            LOGGER.info(f'  flux  uri: [{self.flux}]')
+            LOGGER.info(f'  local uri: [{os.environ.get("FLUX_URI", None)}]')
+
+            if self.flux is None:
                 LOGGER.error('Failed to identify flux uri. Disabling job scheduling')
                 self.do_schedulejobs = False
                 assert False, 'Failed to identify flux uri'
@@ -195,27 +199,21 @@ class WFManager():
 
         # Maestro Adapter Settings
         self.adapter_batch = self.config['wfmanager']['batch']
-        self.adapter_type = self.adapter_batch['type']
 
         # ----------------------------------------------------------------------
         # get the nodes and split them for different jobs
         nnodes_tot = int(os.environ['MUMMI_NNODES'])
+        nnodes_macro = int(os.environ.get('MUMMI_MACRO_NNODES', 0))
+        nnodes_redis = int(os.environ.get('MUMMI_REDIS_NNODES', 0))
 
         # Fixed cost Infrastructure nodes
-        nnodes_flux: int = 0   # Dedicated full node for Flux
-        nnodes_wf: int = 1     # Dedicated CPU-only for wfmanager
-
-        # Variable cost Infrastructure nodes
-        # CPU-only Services
-        #nnodes_dbr: int = int(os.environ.get('MUMMI_DBR_TOTAL_NNODES', 0))
-        nnodes_mac: int = int(os.environ.get('MUMMI_MACRO_NNODES', 0))
-        nnodes_redis: int = int(os.environ.get('MUMMI_REDIS_NNODES', 0))
-        nnodes_infra: int = nnodes_mac + nnodes_redis
+        nnodes_flux = 0   # Dedicated full node for Flux
+        nnodes_wf = 1     # Dedicated CPU-only for wfmanager
 
         # Node computations
-        nnodes_tot:int = nnodes_tot - nnodes_flux
-        nnodes_gpu: int = nnodes_tot
-        nnodes_cpu: int = nnodes_tot - nnodes_wf - nnodes_infra
+        nnodes_tot = nnodes_tot - nnodes_flux
+        nnodes_gpu = nnodes_tot
+        nnodes_cpu = nnodes_tot - (nnodes_wf + nnodes_macro + nnodes_redis)
 
         portion_csim = float(self.wconfig['portion_csim'])
         portion_cg = float(self.wconfig['portion_cg'])
@@ -231,9 +229,7 @@ class WFManager():
                     f'(csim = {nnodes_csim}, cg = {nnodes_cg},'
                     f' bmap = {nnodes_bmap}, aa = {nnodes_aa})')
 
-
         # ----------------------------------------------------------------------
-        
         self.job_trackers = {
             'createsim': JobTracker(self.config['createsim'],
                             nnodes_csim, self.iointerface,
@@ -242,7 +238,7 @@ class WFManager():
                             # self.exception_queue, self.do_schedulejobs),
 
             'cg': JobTracker(self.config['cg'],
-                            nnodes_csim, self.iointerface,
+                            nnodes_cg, self.iointerface,
                             self.adapter_batch,
                             self.do_schedulejobs),
                             # self.exception_queue, self.do_schedulejobs),

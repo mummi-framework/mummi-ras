@@ -5,5 +5,5 @@ maestro:
   batch:
     type:    flux
     host:    summit
-    args:
-        mpi: spectrum   
+    #args:
+    #    mpi: spectrum   # not needed anymore for new flux

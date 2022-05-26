@@ -1,7 +1,7 @@
 job_type: backmapping
 
 config:
-  jobbin:         backmapping
+  #jobbin:         backmapping
   jobname:        backmapping
   jobdesc:        Backmapping ({})
 
@@ -32,11 +32,8 @@ variables:
 
 script: |
 
-  source $SPACK_ROOT/share/spack/setup-env.sh
-  spack load -r gromacs@2019.6.mummifix+double
-  spack load -r gromacs@2019.6.mummifix~double
-  which gmx
-  which gmx_d
+  spack load gromacs@2019.6.mummifix+double
+  spack load gromacs@2019.6.mummifix~double
 
   patch={patch}
   frame={frame}
@@ -44,15 +41,18 @@ script: |
   inpath={inpath}
   outpath={outpath}
   locpath={locpath}
+  outfile={outfile}
 
   echo ">> simname = $simname"
   echo ">> inpath  = $inpath"
   echo ">> outpath = $outpath"
   echo ">> locpath = $locpath"
+  echo ">> gmx     =" `which gmx`
+  echo ">> gmx_d   =" `which gmx_d`
 
   mkdir -p $locpath; cd $locpath
 
-  backmapping \
+  mummi_backmapping \
     --fstype   mummi \
     --patch_id $patch \
     --frame_id $frame \
@@ -61,4 +61,4 @@ script: |
     --outlocal $locpath \
     --logpath  $locpath \
     --loglevel 1 \
-    >> {outfile} 2>&1
+    >> $outfile 2>&1

@@ -3,7 +3,7 @@ job_type: aa
 config:
   bundle_size: 1
 
-  jobbin:     aaanalysis
+  #jobbin:     aaanalysis
   jobname:    aaanalysis
   jobdesc:    AAAnalysis ({}).
 
@@ -30,18 +30,22 @@ variables:
 
 script: |
 
+  source $MUMMI_AMBER_PATH/amber.sh
+
   simname={simname}
   outpath={outpath}
   locpath=$outpath
   fbpath={fbpath}
+  outfile={outfile}
 
   echo ">> simname = $simname"
   echo ">> outpath = $outpath"
   echo ">> locpath = $locpath"
   echo ">> fbpath  = $fbpath"
+  echo ">> pmemd   =" `which pmemd`
 
   mkdir -p $locpath; cd $locpath
 
-  $(LAUNCHER) sh -c "aaanalysis --simname $simname --outpath $outpath --locpath $locpath --fstype mummi --fbio mummi --fcount 0 --step 1 --maxsimtime 12500000 >> {outfile} 2>&1"
+  $(LAUNCHER) sh -c "mummi_aaanalysis --simname $simname --outpath $outpath --locpath $locpath --fstype mummi --fbio mummi --fcount 0 --step 1 --maxsimtime 12500000 >> {outfile} 2>&1"
 
   wait

@@ -2,9 +2,7 @@ job_type: cg
 
 config:
   bundle_size: 1
-  cframe:     25000
 
-  jobbin:     "autobind-12 cganalysis"
   jobname:    cganalysis
   jobdesc:    CGAnalysis ({}).
 
@@ -14,8 +12,8 @@ config:
   ngpus:      1
 
   use_broker: True
-  addtl_args:
-    mpi: spectrum
+  #addtl_args:  # not needed anymore for new flux
+  #  mpi: spectrum
 
 imports:  # possibly needed for any evals
   - mummi_ras
@@ -33,20 +31,22 @@ variables:
 
 script: |
 
-  # set up the run
-  nnodes=1
-  nprocs=1
-  ncores=3
+  module load $MUMMI_MPI_MODULE
+  spack load ddcmd
+  export OMPI_COMM_WORLD_RANK=1
 
   simname={simname}
   outpath={outpath}
   locpath={locpath}
   fbpath={fbpath}
+  outfile={outfile}
 
-  echo ">> simname = $simname"
-  echo ">> outpath = $outpath"
-  echo ">> locpath = $locpath"
-  echo ">> fbpath  = $fbpath"
+  echo ">> simname  = $simname"
+  echo ">> outpath  = $outpath"
+  echo ">> locpath  = $locpath"
+  echo ">> fbpath   = $fbpath"
+  echo ">> ddcmd    =" `which ddcmd_gpu`
+  echo ">> autobind =" `which autobind-12`
 
   mkdir -p $locpath; cd $locpath
 
@@ -73,7 +73,8 @@ script: |
   else
     cframe=25000
   fi
-  $(LAUNCHER) sh -c "autobind-12 cganalysis  -c  -d 2 --simname $simname  --pathremote $outpath  --path $locpath  --fstype mummi  --fbio mummi  --maxsimtime 250000000  --frameProcessBatchSize 5  --simbin ddcMD_GPU  --siminputs $outpath  --fcount $cframe  --nprocs 3 >> {outfile} 2>&1"
+
+  $(LAUNCHER) sh -c "autobind-12 mummi_cganalysis  -c  -d 2  --simname $simname  --path $locpath  --pathremote $outpath  --siminputs $outpath  --fstype mummi  --fbio mummi  --simbin ddcmd_gpu  --maxsimtime 250000000  --frameProcessBatchSize 5  --fcount $cframe  --nprocs 3 >> $outfile 2>&1"
 
   wait
   cp $locpath/*.log $outpath/
