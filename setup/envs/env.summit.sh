@@ -18,6 +18,7 @@ export MUMMI_HOST="summit"
 export MUMMI_GROUP="lrn005"
 
 # Explicit paths
+export MUMMI_SPACK_ROOT="/autofs/nccs-svm1_proj/lrn005/spack2022"
 export MUMMI_AMBER_PATH="/autofs/nccs-svm1_proj/lrn005/amber18"
 export MUMMI_AUTOBIND_PATH="/autofs/nccs-svm1_proj/lrn005/bin"
 

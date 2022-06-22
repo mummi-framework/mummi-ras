@@ -17,6 +17,7 @@ export MUMMI_HOST="lassen"
 export MUMMI_GROUP="mummiusr"
 
 # Explicit paths
+export MUMMI_SPACK_ROOT="/usr/gapps/mummi/spack"
 export MUMMI_AMBER_PATH="/usr/gapps/mummi/amber18"
 export MUMMI_AUTOBIND_PATH="/usr/gapps/mummi/bin"
 
