@@ -24,6 +24,9 @@ spack unload openssl
 echo "(`hostname`: `date`) --> Launching MuMMI workflow ($mummi_nnodes nodes)"
 pushd $MUMMI_ROOT/workspace > /dev/null 2>&1
 
+
+sh $MUMMI_APP/setup/utils/backup_wspace.sh
+
 ## from pilot/mummi-ras (old) repo!
 ## flux mini submit -n 1 -c 24 -N 1 --env=OMP_NUM_THREADS=4 -o mpi=spectrum $SCRIPT_DIR/wfmanager.sh
 

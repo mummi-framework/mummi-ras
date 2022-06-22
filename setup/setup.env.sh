@@ -17,8 +17,8 @@ host=`hostname --long`      # hostname
 
 if [[ $host == *summit* ]]; then
   host=summit
-#elif [[ $host == lassen* ]]; then
-#  host=lassen
+elif [[ $host == lassen* ]]; then
+  host=lassen
 else
   echo "(`hostname`: `date`) --> ERROR: Unidentified host $host" >&2
   return
@@ -70,28 +70,16 @@ source $MUMMI_SPACK_ROOT/share/spack/setup-env.sh
 spack load py-virtualenvwrapper
 source `which virtualenvwrapper.sh`
 
-spack load py-pytest
-spack load py-psutil
-spack load py-filelock
-spack load py-pyyaml
-spack load py-numpy
-spack load py-pytaridx
-spack load py-redis
-spack load py-maestrowf
-spack load flux-sched
-spack load py-cryptography@36.0.1
-spack load py-scipy
-spack load py-parmed
-spack load py-matplotlib
-spack load py-mdanalysis-mummi
-spack load faiss
-spack load py-keras
-spack load py-h5py@2.8.0~mpi
+# host spack
+host_spack_config=$MUMMI_APP/setup/envs/spack.$host.sh
+if [ ! -f $host_spack_config ]; then
+    echo "(`hostname`: `date`) --> ERROR: Could not find $host_spack_config" >&2
+    return
+fi
 
+echo "(`hostname`: `date`) --> Loading host spack config ($host_spack_config)"
+source $host_spack_config
 
-spack load py-pip
-# this is preventing proper functioning of ssh (on summit)
-spack unload openssl
 
 # ------------------------------------------------------------------------------
 # load the virtual environment
@@ -108,7 +96,9 @@ fi
 
 #TODO: we should not have to add this path everytime..
 # the venv should automatically do it for us!
-export PYTHONPATH=$VIRTUAL_ENV/lib/python3.9/site-packages:$PYTHONPATH
+python_version=`python -c 'import sys; print(str(sys.version_info[0])+"."+str(sys.version_info[1]))'`
+
+export PYTHONPATH=$VIRTUAL_ENV/lib/python$python_version/site-packages:$PYTHONPATH
 export PATH=$MUMMI_AUTOBIND_PATH:$PATH
 
 # ------------------------------------------------------------------------------

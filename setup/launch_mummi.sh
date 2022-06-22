@@ -39,6 +39,8 @@ if [ -f $mummi_lockfile ]; then
   exit 1
 fi
 
+touch $mummi_lockfile
+
 # ------------------------------------------------------------------------------
 # load the mummi environment
 # ------------------------------------------------------------------------------
@@ -158,6 +160,8 @@ if false; then
   echo "bkill bsub $LSB_JOBID"
   bkill $LSB_JOBID
 fi
+
+rm $mummi_lockfile
 
 # ------------------------------------------------------------------------------
 # end of the master script
