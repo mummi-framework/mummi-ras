@@ -18,7 +18,7 @@ spack load py-mdanalysis-mummi
 spack load faiss
 spack load py-keras
 spack load py-h5py@2.8.0~mpi
-
+spack load swig
 
 spack load py-pip
 # this is preventing proper functioning of ssh (on summit)
