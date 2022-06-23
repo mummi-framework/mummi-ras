@@ -1,13 +1,12 @@
+#!/usr/bin/env python3
+
 # Copyright (c) 2021, Lawrence Livermore National Security, LLC. All rights reserved. LLNL-CODE-827655.
 # This work was produced at the Lawrence Livermore National Laboratory (LLNL) under contract no. DE-AC52-07NA27344 (Contract 44) between the U.S. Department of Energy (DOE) and Lawrence Livermore National Security, LLC (LLNS) for the operation of LLNL.  See license for disclaimers, notice of U.S. Government Rights and license terms and conditions.
 # ------------------------------------------------------------------------------
-#!/usr/bin/env python
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
+
+import os
 import numpy as np
 import shutil, logging, sys, time, pickle
-# sys.path.insert(0, '/Users/moon15/mummi/mummi-core')
-# sys.path.insert(0, '/Users/moon15/mummi/pytaridx')
 
 import mummi_core, mummi_ras
 from mummi_ras.datastructures.patch import PatchConfig, Patch
@@ -50,6 +49,7 @@ def test_npz(iointerface):
     LOGGER.debug("Maximum difference read: {}".format(maxVal))
     print_separator()
 
+
 def test_patches(iointerface):
     LOGGER.debug('TEST IO: patches')
     patches = []
@@ -82,8 +82,8 @@ def test_rdfs(iointerface):
     rdf.set_zero()
     rdfkey = 'rdfkey'
 
-    iointerface.save_rdfs('_test_io/test_path.tar', rdfkey, rdf)
-    loaded = iointerface.load_rdfs('_test_io/test_path.tar', rdfkey)
+    iointerface.save_rdfs('_test_io/test_path', rdfkey, rdf)
+    loaded = iointerface.load_rdfs('_test_io/test_path', rdfkey)
     LOGGER.debug(loaded)
     print_separator()
 
@@ -100,11 +100,13 @@ def test_checkpoint(iointerface):
     iointerface.take_backup('_test_io/test_signal.txt')
     print_separator()
 
+
 def test_saveload(iointerface):
     LOGGER.debug('TEST IO: files')
-    iointerface.save_files('_test_io/test_namespace.tar', 'test_key', 'blahblahblah')
-    LOGGER.debug(iointerface.load_files('_test_io/test_namespace.tar', 'test_key'))
+    iointerface.save_files('_test_io/test_namespace', 'test_key', 'blahblahblah')
+    LOGGER.debug(iointerface.load_files('_test_io/test_namespace', 'test_key'))
     print_separator()
+
 
 def test_performance(iointerface):
     LOGGER.debug('TEST IO: performance')
@@ -119,6 +121,7 @@ def test_performance(iointerface):
     print(f'Time: {time.time() - t0} sec')
     print_separator()
 
+
 def test_heterogenous(iointerface):
     LOGGER.debug('TEST IO: heterogenous')
 
@@ -127,12 +130,14 @@ def test_heterogenous(iointerface):
     print(iointerface.load_files('_test_io/dir', ['testkey2', 'testkey3', 'testkey4']))
     print_separator()
 
+
 def test_macro_keys(iointerface):
     wspace_fb = Naming.dir_root('feedback-cg')
     print(iointerface.get_keys_for_macro_feedback(wspace_fb, Naming.fb_macro_key('worker')))
     print_separator()
 
-def test_snapshots(iointerface):
+
+def test_snapshots(iointerface, path):
     LOGGER.debug('TEST IO: snapshots')
     NDUMMIES = 3
     frames = list(range(NDUMMIES))
@@ -157,23 +162,21 @@ groups = group free ;
 }"""
     io_simple = mummi_core.get_io('simple')
     for frame in frames:
-        namespace = "{}/snapshot.{:012d}".format(rawpath, frame)
+        namespace = os.path.join(rawpath, f"snapshot.{frame:012d}")
         io_simple.save_files(namespace, "subset#000000", dummy_txt)
 
     iointerface.save_snapshots(frames, rawpath, outpath)
     print(iointerface.list_snapshots(outpath))
 
-    shutil.copy('/p/gpfs1/splash/moon15/lipids-water-eq4.gro', outpath)
-    shutil.copy('/p/gpfs1/splash/moon15/topol.tpr', outpath)
+    shutil.copy(os.path.join(path, 'lipids-water-eq4.gro'), outpath)
+    shutil.copy(os.path.join(path, 'topol.tpr'), outpath)
     extensions = ['name SC1'] * NDUMMIES
-    # loaded = iointerface.load_snapshots(outpath, frames, extensions)
-    # LOGGER.debug(loaded)
     print_separator()
 
-def test_analysis(iointerface):
+
+def test_analysis(iointerface, path):
     LOGGER.debug('TEST IO: analysis')
     io_tar = mummi_core.get_io('taridx')
-    path = '/g/g20/moon15/pilot2/analysis_test/analysis.tar'
     keys = io_tar.list_keys(path, '*')
     frames = []
     extensions = []
@@ -195,16 +198,16 @@ if __name__ == '__main__':
     Naming.init()
     iointerface = mummi_ras.get_io('mummi')
 
-    # test_keys(iointerface)
-    # test_npz(iointerface)
-    # test_patches(iointerface)
-    # test_rdfs(iointerface)
-    # test_checkpoint(iointerface)
-    # test_saveload(iointerface)
-    # test_performance(iointerface)
-    # test_heterogenous(iointerface)
-    test_snapshots(iointerface)
-    # test_analysis(iointerface)
+    test_keys(iointerface)
+    test_npz(iointerface)
+    test_patches(iointerface)
+    test_rdfs(iointerface)
+    test_checkpoint(iointerface)
+    test_saveload(iointerface)
+    test_performance(iointerface)
+    test_heterogenous(iointerface)
+    # test_snapshots(iointerface, '/p/gpfs1/splash/moon15/')
+    # test_analysis(iointerface, '/g/g20/moon15/pilot2/analysis_test/analysis.tar')
 
     shutil.rmtree('_test_io', ignore_errors=True)
 
