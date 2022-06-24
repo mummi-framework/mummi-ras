@@ -50,7 +50,9 @@ echo "(`hostname`: `date`) --> Loading mummi configuration ($mummi_config)"
 source $mummi_config
 
 
-# host config
+# ------------------------------------------------------------------------------
+# set up custom config for this host (available on lassen and summit)
+# ------------------------------------------------------------------------------
 host_config=$MUMMI_APP/setup/envs/env.$host.sh
 if [ ! -f $host_config ]; then
     echo "(`hostname`: `date`) --> ERROR: Could not find $host_config" >&2
@@ -59,26 +61,6 @@ fi
 
 echo "(`hostname`: `date`) --> Loading host environment ($host_config)"
 source $host_config
-
-
-# ------------------------------------------------------------------------------
-# set up the spack installed for kras
-# ------------------------------------------------------------------------------
-echo "(`hostname`: `date`) --> Loading spack environment ($MUMMI_SPACK_ROOT)"
-source $MUMMI_SPACK_ROOT/share/spack/setup-env.sh
-
-spack load py-virtualenvwrapper
-source `which virtualenvwrapper.sh`
-
-# host spack
-host_spack_config=$MUMMI_APP/setup/envs/spack.$host.sh
-if [ ! -f $host_spack_config ]; then
-    echo "(`hostname`: `date`) --> ERROR: Could not find $host_spack_config" >&2
-    return
-fi
-
-echo "(`hostname`: `date`) --> Loading host spack config ($host_spack_config)"
-source $host_spack_config
 
 
 # ------------------------------------------------------------------------------
