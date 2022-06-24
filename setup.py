@@ -14,7 +14,7 @@ src_path = os.path.join(src_path, 'mummi_ras')
 # ------------------------------------------------------------------------------
 setup(
     name='mummi_ras',
-    version='0.0.1',
+    version='1.0.0',
     description='MuMMI for Pilot2.',
     url='https://github.com/mummi-framework/mummi-ras',
 
@@ -41,8 +41,8 @@ setup(
                       'keras==2.2.4',
                       'theano==1.0.4',
                       'matplotlib>=3.4.1',
-                      #'dynim @ git+ssh://git@github.com/LLNL/dynim@main',
-                      #'mummi-core @ git+ssh://git@github.com/mummi-framework/mummi-core@main',
+                      'dynim @ git+https://github.com/LLNL/dynim@main',
+                      'mummi-core @ git+https://github.com/mummi-framework/mummi-core.git@main'
     ],
     classifiers=[
         "Development Status :: 3 - Alpha",
