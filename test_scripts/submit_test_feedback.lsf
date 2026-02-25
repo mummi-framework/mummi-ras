@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+#BSUB -nnodes 1
+#BSUB -W 60
+#BSUB -q pdebug
+#BSUB -G cancer
+#BSUB -o feedback.%J.log
+#BSUB -e feedback.%J.err
+#BSUB -J feedback
+
+source ~/.mummi/config.mummi.sh
+source /etc/profile.d/z00_lmod.sh
+
+source $MUMMI_APP/setup/setup.env.sh
+
+jsrun -n1 -a1 -c ALL_CPUS -g ALL_GPUS python3 $MUMMI_APP/tests/test-mlserver_feedback_frames.py

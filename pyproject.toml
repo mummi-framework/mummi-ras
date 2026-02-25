@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mummi-ras"
+version = "1.0.0"
+description = "Multiscale Machine-Learned Modeling Infrastructure RAS"
+readme = "README.md"
+maintainers = [
+    { name = "Loic Pottier", email = "pottier1@llnl.gov" },
+    { name = "Jeremy Tempkin", email = "tempkin1@llnl.gov" },
+    { name = "Fikret Aydin", email = "aydin1@llnl.gov" },
+    { name = "Helgi I Ingólfsson", email = "ingolfsson1@llnl.gov" }
+]
+authors = [
+    { name = "Harsh Bhatia", email = "hbhatia@llnl.gov" },
+    { name = "Helgi I Ingólfsson", email = "ingolfsson1@llnl.gov" },
+    { name = "Francesco Di Natale", email = "dinatale3@llnl.gov" },
+    { name = "Joseph Moon", email = "moon15@llnl.gov" },
+    { name = "Joseph R Chavez", email = "chavez35@llnl.gov" },
+    { name = "Loic Pottier", email = "pottier1@llnl.gov" },
+    { name = "Jeremy Tempkin Pottier", email = "tempkin1@llnl.gov" },
+    { name = "Fikret Aydin", email = "aydin1@llnl.gov" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: System :: Distributed Computing",
+]
+dependencies = [
+    "h5py>=2.10.0",
+    "keras>=2.2.4",
+    "matplotlib>=3.4.1",
+    "numpy>=1.20.2",
+    "parmed>=3.2.0",
+    "pika>=1.2.0",
+    "pip>=21.2.4",
+    "pytest>=6.2.4",
+    "scipy>=1.6.3",
+    "theano==1.0.5",
+]
+
+[project.scripts]
+mummi_aaanalysis = "mummi_ras.online.aa.aa_analysis:main"
+mummi_backmapping = "mummi_ras.transformations.backmapping.backmapping:main"
+mummi_cganalysis = "mummi_ras.online.cg.cganalysis:main"
+mummi_createsim = "mummi_ras.transformations.createsim.createsims:main"
+mummi_workflow = "mummi_ras.scripts.run_wfmanager:main"
+
+[project.urls]
+Homepage = "https://github.com/mummi-framework/mummi-ras"
+
+[tool.setuptools]
+packages = ["mummi_ras"]

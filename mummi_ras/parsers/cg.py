@@ -1,67 +1,103 @@
-# Copyright (c) 2021, Lawrence Livermore National Security, LLC. All rights reserved. LLNL-CODE-827655.
-# This work was produced at the Lawrence Livermore National Laboratory (LLNL) under contract no. DE-AC52-07NA27344 (Contract 44) between the U.S. Department of Energy (DOE) and Lawrence Livermore National Security, LLC (LLNS) for the operation of LLNL.  See license for disclaimers, notice of U.S. Government Rights and license terms and conditions.
-# ------------------------------------------------------------------------------
-###############################################################################
-# @todo add Pilot2-splash-app disclaimer
+#!/usr/bin/env python3
+# -----------------------------------------------------------------------------
+# Copyright (c) 2024, Lawrence Livermore National Security, LLC. All rights
+# reserved. LLNL-CODE-827655. This work was produced at the Lawrence Livermore
+# National Laboratory (LLNL) under contract no. DE-AC52-07NA27344 (Contract 44)
+# between the U.S. Department of Energy (DOE) and Lawrence Livermore National
+# Security, LLC (LLNS) for the operation of LLNL.  See license for disclaimers,
+# notice of U.S. Government Rights and license terms and conditions.
+#
 # @authors  Harsh Bhatia  <bhatia4@llnl.gov>
 #           Helgi I. Ingolfsson <ingolfsson1@llnl.gov>
-###############################################################################
-
-"""Module to read output of CG simulations."""
+#           Jeremy O. B. Tempkin <tempkin1@llnl.gov>
+#           Loic Pottier <pottier1@llnl.gov>
+# -----------------------------------------------------------------------------
 
 import numpy as np
-#import datetime
+import os
 import logging
+
 import MDAnalysis as mda
 from MDAnalysis.analysis.leaflet import LeafletFinder
+
 import mummi_ras.transformations.createsim.lipiddef as lipiddef
-
-# Set mda defaults
-#mda.core.flags['use_periodic_selections'] = True
-#mda.core.flags['use_KDTree_routines'] = False
-
-# This flag has to be false as lipids are -pbc mol
-# (e.g. all lipid atoms are together untill COM moves across the PBC)
-#mda.core.flags['use_pbc'] = False
-#np.set_printoptions(precision=3)
+import mummi_ras.parsers.cg_aligner as cga 
 
 LOGGER = logging.getLogger(__name__)
 
 
 class CGParser:
+    """Class that manages interface to an underlying MDAnalysis Universe with the purpose to read output of CG simulaitons. 
+    
+    This class implements io, setup / teardown, alignment and returns MDA selections required to compute 
+    observables for other modules in MuMMI. 
+    """
 
-    def __init__(self, fnametraj, fnametopo, empty=False):
+    def __init__(self, fnametraj:str , fnametopo: str, align: bool = True, empty: bool = False, gmx_trajfile: str = None):
+        """Constructor for a CGParser object.
+        """
+
         self.fnametopo = fnametopo
         self.fnametraj = fnametraj
         self.empty = empty
+        self.align = align
+        self.syst = None
+        self.gmx_trajfile = gmx_trajfile
+        # Record the last time the XTC (gmx_trajfile) was modified
+        self.fnametraj_ts = -1
 
-        if not empty:
+        if self.align:
+            self.cga = cga.CGFrameAligner("membrane", True)
+
+        if not os.path.isfile(self.fnametraj):
+            LOGGER.info(f"Frame file {self.fnametraj} does not exist yet.")
+            self.empty = True
+
+        if not self.empty:
             self.setup(fnametraj, fnametopo)
 
+        return
+
+    def isSetup(self):
+        return self.empty == False
+
     def setup(self, fnametraj, fnametopo):
-        LOGGER.info("Initializing CGParser")
+        """Main setup routine for initializing CGParser components.
+        """
+
+        LOGGER.info(f"Initializing CGParser (MDAnalysis version {mda.__version__})")
         LOGGER.info("\tLoading: ({}) ({})".format(self.fnametraj, self.fnametopo))
         # ----------------------------------------------------------------------
         # Load files
-        self.syst = mda.Universe(fnametopo, fnametraj)
-        '''
-        x = self.syst.atoms.select_atoms("resname CYF and name SC1")
-        print x.atoms.positions
-        '''
+        self.syst = mda.Universe(fnametopo, fnametraj, refresh_offsets=True)
 
         LOGGER.info("\tNumber of frames in sim: {:d}".format(len(self.syst.trajectory)))
         LOGGER.info("\tNumber of atoms in sim: {:d}".format(len(self.syst.atoms)))
         LOGGER.info("\tSim dimensions: " + str(self.syst.dimensions[0:3]))
-        #print "\tNumber of frames in sim: {:d}".format(len(self.syst.trajectory))
-        #print "\tNumber of atoms in sim: {:d}".format(len(self.syst.atoms))
-        #print "\tSim dimensions: " + str(self.syst.dimensions[0:3])
+
+        # Get all resnames in this simulation
+        self.resnames = np.unique(self.syst.atoms.resnames)
+
+        # setup lipids
+        self._setup_lipids()
+
+        # aligner setup
+        self._setup_cg_aligner()
+
+        # Setup done now not empty
+        self.empty = False
+
+        LOGGER.debug('__init__ done!')
+
+        return
+
+    def _setup_lipids(self):
+        """Setup routine for lipid definitions and leaflets"""
 
         # ----------------------------------------------------------------------
         # Get list of all supported lipid types
         lipidTypeNames = np.array([l[0] for l in lipiddef.lipidTypeList])
 
-        # Get all resnames in this simulation
-        self.resnames = np.unique(self.syst.atoms.resnames)
 
         # Make a lipid type dictionary
         LOGGER.warn(' Resnames ' +
@@ -117,27 +153,57 @@ class CGParser:
         for i in list(self.lipidTypeDic.values()):
             self.defFlipFlopHeadgroups += i.getNoneLeafletSelection(self.syst)
 
-        # Setup done now not empty
-        self.empty = False
+        return
 
-        # ----------------------------------------------------------------------
-        # Done init!
-        LOGGER.debug('__init__ done!')
+    def remove_duplicate_frame(self, fname: str, keep_original: bool = True):
+        """
+        Remove duplicate frames in a MDA universe. It does it by rewriting a file
+        if keep_original is True, the original XTC is kept as fname.orig
+        """
+        if not self.syst:
+            return
 
+        temp = f"new.{fname}"
+        uniq_idx = {}
+        for x in self.syst.trajectory:
+            if x.time not in uniq_idx:
+                uniq_idx[x.time] = x.frame
 
-    def update_frame(self, frameName):
-        # self.syst.load_new(pdbName)  # This replaces this old cordinates with the new
-        self.syst.load_new(frameName, format='DDCMD')  # This replaces this old cordinates with the new
+        if len(uniq_idx) == self.syst.trajectory.n_frames:
+            LOGGER.info(f"No duplicate frame found in {fname} ({self.syst.trajectory.n_frames})")
+        else:
+            LOGGER.warning(f"{self.syst.trajectory.n_frames-len(uniq_idx)} duplicate frames found in {fname}")
 
-    '''
-    def get_layers(self, frame_idx):
-        # this sets the syst frame to frame_idx for everything that references that syst
-        ts = self.syst.trajectory[frame_idx]
-        LOGGER.info("\tFrame: {:5d}, Time: {:8.3f}ps".format(ts.frame, self.syst.trajectory.time))
-        return self.get_layers()
-    '''
+        slice_idx = np.array([x for x in uniq_idx.values()], dtype=np.int64)
+
+        t = self.syst.atoms
+        t.write(temp, frames = self.syst.trajectory[slice_idx])
+
+        if keep_original:
+            os.rename(fname, f"{fname}.orig")
+            # LOGGER.info(f"listdir after rename of {fname}: {os.listdir()}")
+        os.rename(temp, fname)
+        # LOGGER.info(f"listdir after rename of {temp} into {fname}: {os.listdir()}")
+
+    def _setup_cg_aligner(self):
+        """Setup the aligner"""
+
+        # setup the aligner.
+        self.cga.set_mdu(self.syst)
+
+        # set the protein configuration in aligner
+        self.anchor_resids = cga.alignment_anchors['RAS-BRAF']
+
+        self.cga.set_anchors(self.anchor_resids["origin"],
+                             self.anchor_resids["xaxis"],
+                             self.anchor_resids["xyaxis"])
+
+        self.cga.init()
+
+        return
 
     def get_layers(self):
+        """Return the MDA selections correspinding to the top and bottom leaflets."""
         # Get all lipids in top/bot leaflets (including flip-flop lipids - therefore has to be done for each frame)
         tp = self.top_head + self.defFlipFlopHeadgroups.select_atoms("around 12 global group topsel", topsel=self.top_head)
         bt = self.bot_head + self.defFlipFlopHeadgroups.select_atoms("around 12 global group botsel", botsel=self.bot_head)
@@ -146,21 +212,22 @@ class CGParser:
         # @TODO How long does this take? Haven't ever seen it fail
         # This one should never fail if "normal" lipids don't flip-flop and the bilayers are defect free
         if len(tp.select_atoms("group bt", bt=bt)):
-            LOGGER.warn("\tFrame %d: #%d common atoms between leaflets.\n" %
+            LOGGER.warning("\tFrame %d: #%d common atoms between leaflets.\n" %
                 (self.syst.trajectory.frame, len(tp.select_atoms("group bt", bt=bt))))
 
         #print 'returning from get_layers!'
         return tp, ce, bt
 
-    '''
-    def get_positions(self, frame_idx):
-        tp, bt = self.get_layers(frame_idx)
-        frame = []
-        for layer, layer_name in zip((tp, bt), ('outer', 'inner')):
-            for resname in np.unique(layer.resnames):
-                atoms = layer.select_atoms('resname ' + resname)
-                positions = atoms.positions[:,0:2]
-                frame.append((positions, resname, layer_name))
+    def get_selection(self, selection):
+        """Return the MDAnalysis selection for the passed string.
+        """
+        return self.syst.select_atoms(selection)
 
-        return (frame, frame_idx)
-    '''
+    def align_frame(self):
+        """Align the current frame.
+        """
+
+        self.cga.align()
+
+        return
+

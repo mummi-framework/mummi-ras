@@ -29,7 +29,11 @@ if __name__ == '__main__':
 
     # --------------------------------------------------------------------------
     # read the specs
-    spath = os.path.join(Naming.MUMMI_SPECS, 'workflow/pf2pfpatches.yaml')
+    if Naming.MUMMI_MINI:
+        raise NotImplementedError("Mini MuMMI is not supported by this script")
+    else:
+        spath = os.path.join(Naming.MUMMI_SPECS, 'workflow/pf2pfpatches.yaml')
+
     with open(spath, 'r') as data:
         specs = yaml.load(data, Loader=yaml.FullLoader)
 

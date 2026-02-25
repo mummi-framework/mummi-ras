@@ -220,12 +220,12 @@ the `/tmp/mummi` by default.
 source ~/.mummi/config.mummi.sh
 source $MUMMI_APP/setup/setup.env.sh
 
-spack load -r py-mdanalysis-mummi@mda_1.0.1_ddcmd
+spack load py-mdanalysis-mummi@mda_1.0.1_ddcmd
 spack load py-tqdm
-spack load -r py-parmed
+spack load py-parmed
 
-spack load -r gromacs@2019.6.mummifix +double
-spack load -r gromacs@2019.6.mummifix ~double
+spack load gromacs@2019.6.mummifix +double
+spack load gromacs@2019.6.mummifix ~double
 
 python $MUMMI_APP/mummi_ras/transformations/backmapping/backmapping.py -p pfpatch_000000000012 -f 1325000 --outlocal /g/g92/zhang30/W/MuMMI/scratch/backmap_h2
 ```

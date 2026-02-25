@@ -1,0 +1,68 @@
+job_type: cg
+
+config:
+  bundle_size: 1
+
+  jobname:    cganalysis
+  jobdesc:    CGAnalysis ({}).
+
+  nnodes:     1
+  nprocs:     1
+  cores per task: 10
+  ngpus:      1
+  walltime:       '24:00:00'
+
+  # If this job is nested (run inside batch ob)
+  nested: True
+  #addtl_args:  # not needed anymore for new flux
+  #  mpi: spectrum
+
+imports:  # possibly needed for any evals
+  - mummi_ras
+
+variables:
+  simname: null # value supplied by jobTracker
+  timestamp: null # value supplied by jobTracker
+  outpath:
+    eval: mummi_ras.Naming.dir_sim('cg', '{simname}')
+  locpath:
+    eval: mummi_ras.Naming.dir_local('cg/{simname}')
+  fbpath:
+    eval: mummi_ras.Naming.dir_root('feedback-cg')
+  outfile: 'cg_analysis.out'
+
+script: |
+
+  module load $MUMMI_MPI_MODULE
+  spack load ddcmdconverter target=$(spack arch --target)
+  spack load gromacs@2022.06.gpu target=$(spack arch --target)
+  export OMPI_COMM_WORLD_RANK=1
+  export OMP_NUM_THREADS=8
+
+  simname={simname}
+  outpath={outpath}
+  locpath={locpath}
+  fbpath={fbpath}
+  outfile={outfile}
+
+  echo ">> simname  = $simname"
+  echo ">> outpath  = $outpath"
+  echo ">> locpath  = $locpath"
+  echo ">> fbpath   = $fbpath"
+  echo ">> gmx      =" `which gmx`
+  echo ">> pwd      =" `pwd`
+  echo ">> hostname =" `hostname`
+
+  if ! [ -f ${outpath}/cg_stop ]; then
+    old_cwd=$(pwd)
+    cd $outpath
+    echo "cg_stop does not exist."
+    $(LAUNCHER) -o cpu-affinity=per-task -o gpu-affinity=per-task sh -c "gmx mdrun -cpi -nb gpu -ntmpi 1 -ntomp $OMP_NUM_THREADS -pin off -maxh 24 >> $outfile 2>&1"
+    cd $old_cwd
+    wait
+  else
+    echo "$simname stopped."
+  fi
+  
+  #cp $locpath/*.log $outpath/
+

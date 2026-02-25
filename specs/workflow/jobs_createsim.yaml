@@ -6,8 +6,12 @@ config:
 
   nnodes:         1
   nprocs:         1
-  cores per task: 24
-  walltime:       '04:00:00'
+  cores per task: 7
+  ngpus:          1
+  walltime:       '1:30:00'
+
+  # If this job is nested (run inside batch ob)
+  nested: True
 
 imports: # possibly needed for any evals
   - mummi_ras
@@ -18,7 +22,7 @@ variables:
   simname: null # value supplied by jobTracker
   timestamp: null # value supplied by jobTracker
   inpath:
-    eval: mummi_ras.Naming.dir_root('macro')
+    eval: mummi_ras.Naming.dir_root('ml')
   outpath:
     eval: mummi_ras.Naming.dir_sim('cg', '{simname}')
   locpath:
@@ -26,9 +30,13 @@ variables:
   outfile: 'createsims.out'
 
 script: |
+  export PATH=$MUMMI_AUTOBIND_PATH:$PATH
+  module load $MUMMI_MPI_MODULE
+  export OMP_NUM_THREADS=6
 
-  spack load gromacs@2019.6~cuda
-  spack load ddcmdconverter
+  echo "Loading MPI $MUMMI_MPI_MODULE"
+
+  spack load gromacs@2024.01~mpi~mummi-c2+rocm target=$(spack arch --target)
 
   simname={simname}
   inpath={inpath}
@@ -36,26 +44,46 @@ script: |
   locpath={locpath}
   outfile={outfile}
 
-  echo ">> simname  = $simname"
-  echo ">> inpath   = $inpath"
-  echo ">> outpath  = $outpath"
-  echo ">> locpath  = $locpath"
-  echo ">> gmx      =" `which gmx`
-  echo ">> autobind =" `which autobind-24`
+  
+  echo ">> simname      = $simname"
+  echo ">> inpath       = $inpath"
+  echo ">> outpath      = $outpath"
+  echo ">> locpath      = $locpath"
+  echo ">> gmx          =" `which gmx`
+  echo ">> gridsim2dras =" `which gridsim2dras`
+  echo ">> autobind     =" `which autobind-24`
+  echo ">> hostname     =" `hostname`
+  echo ">> LAUNCHER     =" $(LAUNCHER)
 
-  mkdir -p $locpath; cd $locpath
+  mkdir -p -v $locpath; cd $locpath
 
-  mummi_createsim \
-    --fstype mummi \
+  # used in CPU version 
+  #  --mpi "autobind-24 gmx mdrun" \
+  #  --mdrunopt " -rdd 2.0 -ntomp 4 -dd 4 3 2 -nt 96" \
+
+  # LAUNCHER is set to "flux run -n 1 -N 1 -c $OMP_NUM_THREADS -g 1"
+  # We set OMP_NUM_THREADS=6 to give one core to the macro model
+
+  export OMP_NUM_THREADS=6
+  flux run -n 1 -N 1 -c $OMP_NUM_THREADS -g 1 mummi_createsim \
+    --fstype simple \
     --patch $simname \
     --inpath $inpath \
     --outpath $outpath \
     --outlocal $locpath \
     --logpath $locpath \
-    --loglevel 1 \
+    --loglevel 2 \
     --gromacs gmx \
-    --mpi "autobind-24 gmx mdrun" \
-    --mdrunopt " -rdd 2.0 -ntomp 4 -dd 4 3 2 -nt 96" \
+    --mpi "gmx mdrun" \
+    --mdrunopt " -nb gpu -ntmpi 1 -ntomp $OMP_NUM_THREADS -pin auto" \
     >> $outfile 2>&1
 
   wait
+
+  echo "Createsims is done in $outpath"
+  mkdir -p $outpath
+
+  if [ -z "$( ls -A $outpath )" ]; then
+    echo "$outpath is empty, assuming timeout, adding createsims_failure"
+    touch $outpath/createsims_failure
+  fi

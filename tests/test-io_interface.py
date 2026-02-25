@@ -168,7 +168,7 @@ groups = group free ;
     iointerface.save_snapshots(frames, rawpath, outpath)
     print(iointerface.list_snapshots(outpath))
 
-    shutil.copy(os.path.join(path, 'lipids-water-eq4.gro'), outpath)
+    shutil.copy(os.path.join(path, 'lipids-water-eq6.gro'), outpath)
     shutil.copy(os.path.join(path, 'topol.tpr'), outpath)
     extensions = ['name SC1'] * NDUMMIES
     print_separator()

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+
+if [ -z "$MUMMI_CONF" ]; then
+  mummi_config=$HOME/.mummi/config.mummi.sh
+  echo "(`hostname`: `date`) --> \$MUMMI_CONF was not set, defaulting to config in \$HOME directory: $mummi_config" >&2
+else
+  mummi_config="$MUMMI_CONF"
+  echo "(`hostname`: `date`) --> using \$MUMMI_CONF=$MUMMI_CONF for config " >&2
+fi
+
+if [ ! -f $mummi_config ]; then
+  echo "(`hostname`: `date`) --> ERROR: Could not find ($mummi_config)" >&2
+  exit 1
+fi
+source $mummi_config
+
+NODES="$1"
+TIMEOUT="$2"
+#QUEUE="pdebug"
+QUEUE="pbatch"
+#QUEUE="expedite"
+DEP="$3"
+if [ -z "${DEP}" ]; then
+    bsub -G cancer -nnodes $NODES -W $TIMEOUT -q $QUEUE $MUMMI_APP/setup/launch_mummi.sh $NODES
+else    
+    bsub -G cancer -nnodes $NODES -W $TIMEOUT -q $QUEUE -w "ended($DEP)" $MUMMI_APP/setup/launch_mummi.sh $NODES
+fi

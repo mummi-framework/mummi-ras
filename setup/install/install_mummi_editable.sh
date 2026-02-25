@@ -1,6 +1,4 @@
 #!/bin/bash
-# ------------------------------------------------------------------------------
-
 
 # disabling sourcing of this script!
 if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
@@ -22,45 +20,56 @@ echo '>' `date`
 echo "> This script (re)installs editable MuMMI for (`whoami`) in virtual environment ($VIRTUAL_ENV)!"
 echo ''
 
+# spack find py-pip
+# if [ $? -eq 0 ]; then
+#   echo "Unloading Spack pip"
+#   spack unload py-pip
+# fi
+
+TIMEOUT=600
 # ------------------------------------------------------------------------------
-echo "> Using pip: `which pip`"
+echo "> Using pip: `command -v pip`"
+# Problematic on Frontier where compute nodes don't have access to internet.
+# echo "> Upgrading pip"
+# pip install --require-virtualenv --default-timeout=$TIMEOUT --upgrade pip
 echo '> Removing existing build of MuMMI'
-
-pip uninstall mummi_core mummi_ras
-
-# ------------------------------------------------------------------------------
-export CC=`which mpicc`
-export CXX=`which mpic++`
-spack load swig@4.0.2/lk5op3c
+pip uninstall --yes mummi_core mummi_ras
 
 # ------------------------------------------------------------------------------
-pushd $MUMMI_CORE >/dev/null
+#spack load swig
 
-echo "> Building MuMMI_core (`pwd`)"
-
-rm -rf build 2>/dev/null
-rm -rf mummi_core.egg-info 2>/dev/null
-pip install -v -e .
-
-popd >/dev/null
-
-
-pushd $MUMMI_APP >/dev/null
-
-echo "> Building MuMMI_ras (`pwd`)"
-rm -rf build 2>/dev/null
-rm -rf mummi_ras.egg-info 2>/dev/null
-pip install -v -e .
-
-popd >/dev/null
+export CC=`command -v mpicc`
+export CXX=`command -v mpic++`
 
 # ------------------------------------------------------------------------------
-spack unload swig
+echo '> Building MuMMI_core'
+#cd $MUMMI_CORE
+rm -rf $MUMMI_CORE/build 2>/dev/null
+rm -rf $MUMMI_CORE/mummi_core.egg-info 2>/dev/null
+echo "Current pip: `command -v pip`"
+pip install --require-virtualenv --default-timeout=$TIMEOUT -e $MUMMI_CORE --prefix $VIRTUAL_ENV
 
+echo '> Building MuMMI_ras'
+#cd $MUMMI_APP
+rm -rf $MUMMI_APP/build 2>/dev/null
+rm -rf $MUMMI_APP/mummi_ras.egg-info 2>/dev/null
+pip install --require-virtualenv --default-timeout=$TIMEOUT -e $MUMMI_APP --prefix $VIRTUAL_ENV
 
 # ------------------------------------------------------------------------------
-if [[ $MUMMI_HOST == summit ]]; then
-    sh $MUMMI_APP/setup/utils/replace_python_in_venv_bins.sh 
+#spack unload swig
+
+# ------------------------------------------------------------------------------
+HOST=`hostname --long`
+if [[ $HOST == *summit* ]]; then
+
+    ENV_PYTHON="#\!/bin/env python"
+    HEADER_FILES=( $( grep -I "opt/spack" $VIRTUAL_ENV/bin/* | awk -F":" ' { print $1 } ' ))
+    HEADER_FILES+=( $( grep -I "$VIRTUAL_ENV" $VIRTUAL_ENV/bin/* | awk -F":" ' { print $1 } ' ))
+    for f in "${HEADER_FILES[@]}"
+    do
+        echo "Replacing python header in (${f})"
+        sed -i.bak --expression "1s@^.*@$ENV_PYTHON@" $f
+    done
 fi
 
 echo ''

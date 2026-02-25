@@ -1,6 +1,14 @@
-# Copyright (c) 2021, Lawrence Livermore National Security, LLC. All rights reserved. LLNL-CODE-827655.
-# This work was produced at the Lawrence Livermore National Laboratory (LLNL) under contract no. DE-AC52-07NA27344 (Contract 44) between the U.S. Department of Energy (DOE) and Lawrence Livermore National Security, LLC (LLNS) for the operation of LLNL.  See license for disclaimers, notice of U.S. Government Rights and license terms and conditions.
-# ------------------------------------------------------------------------------
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# -----------------------------------------------------------------------------
+# Copyright (c) 2021, Lawrence Livermore National Security, LLC. All rights
+# reserved. LLNL-CODE-827655. This work was produced at the Lawrence Livermore
+# National Laboratory (LLNL) under contract no. DE-AC52-07NA27344 (Contract 44)
+# between the U.S. Department of Energy (DOE) and Lawrence Livermore National
+# Security, LLC (LLNS) for the operation of LLNL.  See license for disclaimers,
+# notice of U.S. Government Rights and license terms and conditions.
+# -----------------------------------------------------------------------------
+
 from typing import List, Dict
 import time
 import yaml
@@ -116,7 +124,20 @@ def _remove_from_running_dict(original_dict: Dict[int, List[str]], remove_list: 
     
     return original_dict
 
-
+##################################################################################
+#
+#   source the environment of MUMMI
+#      source $MUMMI_APP/setup/setup.env.sh
+#   Create an empty  wfmanager.chk file in sub-directory test
+#      mkdir test
+#      python $MUMMI_APP/mummi_ras/scripts/update_wf_chkpt.py create test
+#      cd test
+#
+#   Add new patchs (a list of npz file names) in patch file 
+#  to createsim queued in wfmanager_20221008-021138.chk.yml
+#      python $MUMMI_APP/mummi_ras/scripts/update_wf_chkpt.py modify wfmanager_20221008-021138.chk.yml  add createsim queued patch
+#
+##################################################################################
 if __name__ == "__main__":
     import sys 
     from os.path import dirname, abspath, join, isdir

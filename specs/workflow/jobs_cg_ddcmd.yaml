@@ -1,0 +1,94 @@
+job_type: cg
+
+config:
+  bundle_size: 1
+
+  jobname:    cganalysis
+  jobdesc:    CGAnalysis ({}).
+
+  nnodes:     1
+  nprocs:     1
+  cores per task: 6 # 6 frontier / 3 summit / 5 on lassen
+  ngpus:      1
+
+  # If this job is nested (run inside batch ob)
+  nested: True
+  #addtl_args:  # not needed anymore for new flux
+  #  mpi: spectrum
+
+imports:  # possibly needed for any evals
+  - mummi_ras
+
+variables:
+  simname: null # value supplied by jobTracker
+  timestamp: null # value supplied by jobTracker
+  outpath:
+    eval: mummi_ras.Naming.dir_sim('cg', '{simname}')
+  locpath:
+    eval: mummi_ras.Naming.dir_local('cg/{simname}')
+  fbpath:
+    eval: mummi_ras.Naming.dir_root('feedback-cg')
+  outfile: 'cg_analysis.out'
+
+script: |
+
+  module load $MUMMI_MPI_MODULE
+  spack load ddcmd target=$(spack arch --target)
+  export OMPI_COMM_WORLD_RANK=1
+
+  simname={simname}
+  outpath={outpath}
+  locpath={locpath}
+  fbpath={fbpath}
+  outfile={outfile}
+
+  echo ">> simname  = $simname"
+  echo ">> outpath  = $outpath"
+  echo ">> locpath  = $locpath"
+  echo ">> fbpath   = $fbpath"
+  echo ">> ddcmd    =" `which ddcMD_GPU`
+  echo ">> autobind =" `which autobind-12`
+  echo ">> pwd      =" `pwd`
+  echo ">> hostname =" `hostname`
+  
+  mkdir -p -v $locpath; cd $locpath
+
+  cp $outpath/martini0.data                         $locpath/
+  cp $outpath/molecule0.data                        $locpath/
+  cp $outpath/constraint0.data                      $locpath/
+  cp $outpath/object.data                           $locpath/
+  cp $outpath/restraint.data                        $locpath/
+
+  cp $outpath/topol.tpr                             $locpath/
+  cp $outpath/lipids-water-eq6.gro                  $locpath/
+
+  cp -P $outpath/restart                            $locpath/
+  cp -r $(dirname `readlink -f $outpath/restart`)   $locpath/
+
+  # NOTE: changed to avoid curly brace collision
+  rs=`readlink -f $locpath/restart`
+  sname=`basename $(dirname $rs)`
+  snum=$(echo $sname | cut -f2 -d".")
+
+  if [ -n "$snum" ] && [ "$snum" -eq "$snum" ] 2>/dev/null; then
+    cframe=`expr $snum + 25000`
+  else
+    cframe=25000
+  fi
+
+  $(LAUNCHER) sh -c "autobind-12 mummi_cganalysis \
+        -c \
+        --loglevel 2 \
+        --simname $simname \
+        --path $locpath \
+        --pathremote $outpath \
+        --siminputs $outpath \
+        --fstype mummi \
+        --fbio mummi \
+        --simbin ddcMD_GPU \
+        --minsimtime 10000000 \
+        --maxsimtime 25000000 \
+        --frameProcessBatchSize 5 \
+        --fcount $cframe \
+        --nprocs 3 >> $outfile 2>&1"
+

@@ -1,0 +1,21 @@
+
+LOGLEVEL: 20 # 10 for debug
+INTERVAL_SECS: 60
+JOB_NAMES_2_COUNT:
+  - createsim+
+  - cganalysi+
+JOB_NAMES_2_TRACK:
+  - wfmanager.
+  - mlserver.
+  - ucgserver.
+
+FIRST_KILL_CLEANUP_SECS: 360
+SECOND_KILL_CLEANUP_SECS: 300
+
+FIRST_KILL_NAMES: 
+  - wfmanager.
+  - mlserver.
+  - ucgserver.
+
+SECOND_KILL_NAMES: 
+  - cganalysi+

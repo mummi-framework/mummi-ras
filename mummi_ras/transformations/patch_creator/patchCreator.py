@@ -8,7 +8,7 @@ from mummi_core.utils import Naming
 from mummi_core.utils.timer import Timer
 from mummi_ras.datastructures.patch import PatchConfig, Patch
 from mummi_ras.datastructures.patch import Patch as pfPatch
-from mummi_ras.datastructures.names_of_lipids_and_proteins import MACRO_RAS_ALL_NAMES
+from mummi_ras.datastructures.names_of_lipids_and_proteins import MACRO_ADMIRRAL_NAMES
 import mummi_ras
 from mummi_ras.transformations.patch_creator.macroParser import MacroParser, show_macro_data
 
@@ -27,7 +27,7 @@ class MacroPatchCreator (object):
 
     @staticmethod
     def get_ras_idxs(protein_states):
-        return np.where(np.isin(protein_states, MACRO_RAS_ALL_NAMES))[0]
+        return np.where(np.isin(protein_states, MACRO_ADMIRRAL_NAMES))[0]
 
     # --------------------------------------------------------------------------
     # create patches from a macro snapshot *at native resolution*
@@ -425,7 +425,6 @@ class MacroPatchCreator (object):
                           patch_cent, prot_ids, prot_states, prot_pos,
                           complexes)
                 LOGGER.debug(f'Created ({patch_id})')
-
                 # center around first RAS
                 if prot_states is not None:
                     assert prot_states.shape[0] > 0, f'Found no proteins'
@@ -434,7 +433,7 @@ class MacroPatchCreator (object):
                     first_ras_pos = np.copy(prot_pos[ras_idxs[0]][:2])
 
                     #show_patch(p.concentrations, p.protein_positions)
-                    p.wrap_to_center(first_ras_pos)
+                    p.wrap_to_center(first_ras_pos, psize=40)
                     #show_patch(p.concentrations, p.protein_positions)
 
                 patches[patch_id] = p
@@ -624,9 +623,9 @@ class MacroPatchCreator (object):
 # --------------------------------------------------------------------------
 # create an abstraction to grab the patches out of gc simulations
 # --------------------------------------------------------------------------
-def fetch_gc_patches(inpath, patch_ids):
+def fetch_gc_patches(inpath, patch_ids, iointerface_type="mummi"):
 
-    iointerface = mummi_ras.get_io('mummi')
+    iointerface = mummi_ras.get_io(iointerface_type)
 
     # --------------------------------------------------------------------------
     # read a list of patches and return a dictionary

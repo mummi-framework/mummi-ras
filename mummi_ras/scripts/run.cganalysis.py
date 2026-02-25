@@ -28,9 +28,13 @@ if __name__ == '__main__':
     mummi_ras.init()
 
     # configuration for pfpatches
-    rpath = os.path.join(Naming.MUMMI_RESOURCES, 'wfspecs/wfmanager.yaml')
+    if Naming.MUMMI_MINI:
+        raise NotImplementedError("Mini MuMMI is not supported by this script")
+    else:
+        rpath = os.path.join(Naming.MUMMI_RESOURCES, 'wfspecs/wfmanager.yaml')
+
     with open(rpath, 'r') as data:
-        pyaml = yaml.load(data)
+        pyaml = yaml.load(data, Loader=yaml.Loader)
 
     env = pyaml['cganalysis']['env']
     config = pyaml['cganalysis']['config']

@@ -17,3 +17,12 @@ The execution of the `cganalysis` requires at least 2 CPU-cores and a single
 GPU in order to execute. The ddcMD code executes a lipid-protein system using
 at least a single CPU-core and a single GPU, with the remaining processes
 running on the remaining cores.
+
+### Summary of analysis module structure
+
+cganalysis.py contains the main launch process for online and offline analysis
+of martini simulations. 
+
+It relies on the walker-API implemented in MuMMI-core for abstracting the MD
+engine from the cganalysis execution. 
+

@@ -1,6 +1,14 @@
-# Copyright (c) 2021, Lawrence Livermore National Security, LLC. All rights reserved. LLNL-CODE-827655.
-# This work was produced at the Lawrence Livermore National Laboratory (LLNL) under contract no. DE-AC52-07NA27344 (Contract 44) between the U.S. Department of Energy (DOE) and Lawrence Livermore National Security, LLC (LLNS) for the operation of LLNL.  See license for disclaimers, notice of U.S. Government Rights and license terms and conditions.
-# ------------------------------------------------------------------------------
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# -----------------------------------------------------------------------------
+# Copyright (c) 2021, Lawrence Livermore National Security, LLC. All rights
+# reserved. LLNL-CODE-827655. This work was produced at the Lawrence Livermore
+# National Laboratory (LLNL) under contract no. DE-AC52-07NA27344 (Contract 44)
+# between the U.S. Department of Energy (DOE) and Lawrence Livermore National
+# Security, LLC (LLNS) for the operation of LLNL.  See license for disclaimers,
+# notice of U.S. Government Rights and license terms and conditions.
+# -----------------------------------------------------------------------------
+
 import os
 import enum
 import logging
@@ -8,50 +16,50 @@ import time
 import logging
 from multiprocessing import  Pool
 import numpy as np
+import MDAnalysis as mda
+from typing import List
 
-from mummi_core.interfaces.utils import move_to, tar_and_remove
 from mummi_core.utils.naming import MuMMI_NamingUtils as  Naming
 from mummi_ras.datastructures.cgSnapshot import CGSnapshot
 from mummi_ras.interfaces import get_io
+from mummi_ras.online.cg.get_tiltrot_z_state_multiple import get_protein_info, getKRASstates
 from mummi_core.utils.utilities import sig_ign_and_rename_proc
 
-try:
-    import dynim
-except ImportError:
-    from . import dynim
+# dynim 0.1 in Spack does not have dynim.SamplerBinned so we import local dynim
+# try:
+#     import dynim
+# except ImportError:
+from ... import dynim
 
 LOGGER = logging.getLogger(__name__)
 
-
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
-class CGSelectorType(enum.Enum):
+class UCGSelectorType(enum.Enum):
     Unknown = 0
     Worker = 1
     Manager = 2
 
-
 # ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-class CGSelector(object):
+class UCGSelector(object):
 
     # name of the selector (will have simname and hostname)
     namefmt = '{}'  # removed hostname and cg-selector
 
     # --------------------------------------------------------------------------
-    def __init__(self, type: CGSelectorType, simname: str, workspace: str, config: dict):
+    def __init__(self, type: UCGSelectorType, simname: str, workspace: str, config: dict):
 
         assert isinstance(workspace, str) and isinstance(config, dict)
-        assert isinstance(type, CGSelectorType)
-        assert type in [CGSelectorType.Manager, CGSelectorType.Worker]
+        assert isinstance(type, UCGSelectorType)
+        assert type in [UCGSelectorType.Manager, UCGSelectorType.Worker]
 
         self.type = type
         self.simname = simname
-        self.name = CGSelector.namefmt.format(simname)
+        self.name = UCGSelector.namefmt.format(simname)
         self.workspace = workspace
         self.io = get_io('simple')
 
-        if type == CGSelectorType.Worker:
+        if type == UCGSelectorType.Worker:
             self.last_frame = -1
 
         else:
@@ -74,7 +82,7 @@ class CGSelector(object):
 
     # --------------------------------------------------------------------------
     def __str__(self):
-        if self.type == CGSelectorType.Manager:
+        if self.type == UCGSelectorType.Manager:
             return f'<{self.name}: #candidates = {self.sampler.num_candidates()}>'
         else:
             return f'<{self.name}: last_frame = {self.last_frame}>'
@@ -86,12 +94,65 @@ class CGSelector(object):
     def num_candidates(self):
         return self.sampler.num_candidates()
 
+    def num_selected(self):
+        return self.sampler.num_selected()
+
     def update(self):
         self.sampler.update()
 
     # --------------------------------------------------------------------------
-    def add_snapshot(self, simname, frame_id, tilt, rot, depth):
+    def add_snapshot(self, structure_file: str, topology_file: str, cleanup: bool = False):
+        """
+        Add a valid frame (snapshot) to the selection process.
 
+        :param structure_file: Path to the structure file (.gro)
+        :type structure_file: str
+        :param topology_file: Path to the corresponding topology file (.tpr)
+        :type topology_file: str
+        :param cleanup: If True, we delete the topology file after computing the tilt, rotation and depth.
+        :type cleanup: bool
+        """
+
+        simname = os.path.splitext(structure_file)[0]
+        frame_id = int(self._remove_but_digits(simname.split('_')[-1]))
+        LOGGER.debug(f"fnamestrct = {structure_file}, fnametopo = {topology_file}, simname = {simname}")
+
+        syst = mda.Universe(topology_file, structure_file)
+
+        # Obtain trd info from backmapped structures 
+        kras_indices = get_protein_info(syst, 'resname ACE1 and name BB')
+        # Here for UCG lipids_exist MUST be True
+        states_list = getKRASstates(syst, kras_indices, lipids_exist = False)
+
+        tilt = np.deg2rad(states_list[0][0][2])
+        rot = np.deg2rad(states_list[0][0][3])
+        depth = states_list[0][0][4]
+
+        self._add_snapshot(simname, frame_id, tilt, rot, depth)
+        # We delete the topology files
+        if cleanup:
+            try:
+                os.remove(topology_file)
+            except OSError as e:
+                LOGGER.error(f"Could delete file {e.filename} => {e.strerror}")
+                pass
+
+    # --------------------------------------------------------------------------
+    def _add_snapshot(self, simname: str, frame_id: int, tilt: float, rot: float, depth: float):
+        """
+        XXX
+
+        :param simname: XXX
+        :type simname: str
+        :param frame_id: XXX
+        :type frame_id: str
+        :param tilt: XXX
+        :type tilt: float
+        :param rot: XXX
+        :type rot: float
+        :param depth: XXX
+        :type depth: float
+        """
         LOGGER.debug(f'adding [sim {simname}, frame({frame_id})]: t={tilt} r={rot} d={depth}')
 
         cg = CGSnapshot(simname, frame_id, tilt, rot, depth)
@@ -100,23 +161,22 @@ class CGSelector(object):
             return
 
         # for a worker, write this file
-        if self.type == CGSelectorType.Worker:
+        if self.type == UCGSelectorType.Worker:
             assert simname == self.simname
 
-            fname = Naming.cgframe(self.simname, frame_id)
+            fname = Naming.ucgframe(self.simname, frame_id)
             self.io.save_npz(self.workspace, fname, cg, CGSnapshot.save_npz)
             self.last_frame = max(self.last_frame, frame_id)
 
         # for a manager, add to datastructure
         else:
-            hdpoints = [dynim.HDPoint(Naming.cgframe(cg.simname, cg.frame_id), cg.data)]
+            hdpoints = [dynim.HDPoint(Naming.ucgframe(cg.simname, cg.frame_id), cg.data)]
             self.sampler.add_candidates(hdpoints)
 
     # --------------------------------------------------------------------------
     def add_snapshots(self, snapshots):
-        assert 0
         n = len(snapshots)
-        if n == 0:
+        if n == 0 or self.type == UCGSelectorType.Worker:
             return
 
         LOGGER.info(f'adding {n} snapshots')
@@ -127,27 +187,21 @@ class CGSelector(object):
 
         snapshots = [CGSnapshot(d[0], d[1], d[2], d[3], d[4]) for d in snapshots]
 
-        # for a worker, write this file
-        if self.type == CGSelectorType.Worker:
-            assert False
-
         # for a manager, add to datastructure
-        else:
-            hdpoints = [dynim.HDPoint(Naming.cgframe(cg.simname, cg.frame_id), cg.data) for cg in snapshots]
-            self.sampler.add_candidates(hdpoints)
+        hdpoints = [dynim.HDPoint(Naming.ucgframe(cg.simname, cg.frame_id), cg.data) for cg in snapshots]
+        self.sampler.add_candidates(hdpoints)
 
     # --------------------------------------------------------------------------
     @staticmethod
     def _load_cg_snapshot(filename):
         try:
             _cg = CGSnapshot.load_npz(filename)
-            _id = Naming.cgframe(_cg.simname, _cg.frame_id)
-            assert os.path.basename(filename) == _id+'.npz', f'Invalid id (= {_id}) read for key {key}'
+            _id = Naming.ucgframe(_cg.simname, _cg.frame_id)
+            assert os.path.basename(filename) == _id+'.npz', f'Invalid id (= {_id}) read for key {_cg.simname}'
             return dynim.HDPoint(_id, _cg.data)
 
         except Exception:
             return None
-
 
     def update_manager(self, max_keys = 300000):
 
@@ -169,8 +223,6 @@ class CGSelector(object):
         os.makedirs(outpath, exist_ok=True)
 
         load_pool = Pool(processes=10, initializer=sig_ign_and_rename_proc, initargs=('pool_load_cgSelector',))
-        #write_pool = Pool(processes=10, initializer=sig_ign_and_rename_proc, initargs=('pool_write_cgSelector',))
-
         hdpoints = []
         chunk_size = 10000
 
@@ -181,7 +233,7 @@ class CGSelector(object):
 
                 # parallel: load frames
                 fnames = [os.path.join(self.workspace, k) for k in keys_chunk]
-                frames = load_pool.map(CGSelector._load_cg_snapshot, fnames, chunksize=1000)
+                frames = load_pool.map(UCGSelector._load_cg_snapshot, fnames, chunksize=1000)
                 frames = np.array(frames)
 
                 # figure out which ones were successful
@@ -202,16 +254,9 @@ class CGSelector(object):
                     except Exception as _expt:
                         LOGGER.error(f'Failed to move ({key}): {_expt}')
 
-                #write_pool.apply_async(tar_and_remove, (self.proc_path, proc_name, self.workspace,
-                #                                        keys_chunk, frames,
-                #                                        CGSnapshot.save_npz))
-
         finally:
             load_pool.close()
-            #write_pool.close()
-
             load_pool.join()
-            #write_pool.join()
 
         # now add these to the sampler
         hdpoints = np.concatenate(hdpoints)
@@ -221,8 +266,18 @@ class CGSelector(object):
         self.checkpoint()
 
     # --------------------------------------------------------------------------
-    def select(self, k, do_confirm=True):
+    def select(self, k: int, do_confirm: bool = True) -> List[dynim.HDPoint]:
+        """
+        Select k points from the pool of available structures.
 
+        :param k: Number of structure to select
+        :type k: int
+        :param do_confirm: Confirm the selection (see Dynim documentation)
+        :type do_confirm: bool
+
+        :return: The selected high-dimensional points
+        :rtype: List[dynim.HDPoint]
+        """
         assert isinstance(k, int)
         assert k >= 0
 
@@ -230,7 +285,7 @@ class CGSelector(object):
         # HB moved the sampler update from add_candidates() to select()
         self.sampler.update()
 
-        LOGGER.info(f'Selecting {k} CG frames from ({self.name})')
+        LOGGER.info(f'Selecting {k} UCG frames from ({self.name})')
 
         self.recent_selections = self.sampler.select(k, do_confirm)
         selections = self.recent_selections
@@ -239,9 +294,13 @@ class CGSelector(object):
         if do_confirm:
             self.recent_selections = []
 
-        LOGGER.debug(f'Selected {len(selections)} CG frames from ({self.name})')
+        LOGGER.debug(f'Selected {len(selections)} UCG frames from ({self.name})')
         self.checkpoint()
         return selections
+
+    def _remove_but_digits(self, s: str) -> str:
+        """ Remove everything but digits from a string"""
+        return ''.join([x for x in s if x.isdigit()])
 
     # --------------------------------------------------------------------------
     def test(self):
@@ -253,9 +312,4 @@ class CGSelector(object):
     def restore(self):
         return self.sampler.restore()
 
-    #def restore_lspace(self, filepath):
-    #    self.sampler.hdspace.restore(filepath)
-
-
-# ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------

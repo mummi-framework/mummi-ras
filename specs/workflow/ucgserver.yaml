@@ -1,0 +1,36 @@
+# This file describes the options that can be used for the MuMMI ML server
+
+config:
+  jobname:       "ucgserver"
+  log_mem_usage: 1
+  loglevel:      2       # When stable, change to 2 (debug is 1)
+  logpath:       ''      # empty logpath will use ROOT/workspace
+  logfile:       0       # whether to write log to file
+  logstdout:     1       # whether to write log to stdout
+
+workspace:
+  path:
+    eval: mummi_ras.Naming.dir_root('ucgserver')
+  # The file where the credentials are stored
+  credentials: "rabbitmq-credentials.json"
+  # The file where the TLS certificate is stored
+  certificate: "rabbitmq-credentials.cacert"
+
+# Broker (for example RabbitMQ) parameters
+broker:
+  interface:   'rabbitmq'
+  queue:       'mummi_ucg'
+
+# Auto-encoder (ML model) parameters
+encoder:
+  path: "/p/vast1/mummiusr/mummi_large_resources/"
+  model: "model-xyz_reconstruction-initial_reconstruction_new5-c900_z751x3-t2023-03-23-09-14-29_h989404"
+
+generator:
+  outpath:
+    eval: mummi_ras.Naming.dir_root('ucg')
+  trajectories: "ucg_trajectories.txt"
+
+validator:
+  outpath:
+    eval: mummi_ras.Naming.dir_root('ucg')

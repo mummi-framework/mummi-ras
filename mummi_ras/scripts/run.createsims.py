@@ -29,10 +29,12 @@ if __name__ == '__main__':
     mummi_ras.init()
 
     # configuration for pfpatches
-    # rpath = os.path.join(Naming.RESOURCES, 'wfspecs/wfmanager.yaml')
-    rpath = os.path.join(Naming.MUMMI_SPECS, 'workflow/wfmanager.yaml')
+    if Naming.MUMMI_MINI:
+        rpath = os.path.join(Naming.MUMMI_SPECS, 'mini-mummi/wfmanager.yaml')
+    else:
+        rpath = os.path.join(Naming.MUMMI_SPECS, 'workflow/wfmanager.yaml')
     with open(rpath, 'r') as data:
-        pyaml = yaml.load(data)
+        pyaml = yaml.load(data, Loader=yaml.Loader)
 
     env = pyaml['createsim']['env']
     conf = pyaml['createsim']['config']

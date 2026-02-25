@@ -1,0 +1,66 @@
+job_type: createsim
+
+config:
+  jobname:        createsim
+  jobdesc:        CreateSim ({})
+
+  nnodes:         1
+  nprocs:         1
+  cores per task: 6
+  ngpus:          1
+  walltime:       '0:45:00'
+
+imports: # possibly needed for any evals
+  - mummi_ras
+
+dir_sim: cg
+
+variables:
+  simname: null # value supplied by jobTracker
+  timestamp: null # value supplied by jobTracker
+  inpath:
+    eval: mummi_ras.Naming.dir_root('ml')
+  outpath:
+    eval: mummi_ras.Naming.dir_sim('cg', '{simname}')
+  locpath:
+    eval: mummi_ras.Naming.dir_local('createsim/{simname}')
+  outfile: 'createsims.out'
+
+script: |
+  export PATH=$MUMMI_AUTOBIND_PATH:$PATH
+  module load $MUMMI_MPI_MODULE
+  export OMP_NUM_THREADS=6
+
+  # USERS: change this with the correct version/PATH of GROMACS that you use
+  spack load gromacs~mpi~mummi-c2 arch=$(spack arch)
+
+  simname={simname}
+  inpath={inpath}
+  outpath={outpath}
+  locpath={locpath}
+  outfile={outfile}
+  
+  echo ">> simname      = $simname"
+  echo ">> inpath       = $inpath"
+  echo ">> outpath      = $outpath"
+  echo ">> locpath      = $locpath"
+  echo ">> gmx          =" $(command -v gmx)
+  echo ">> hostname     =" $(hostname)
+
+  mkdir -p -v $locpath; cd $locpath
+
+  mummi_createsim \
+    --fstype simple \
+    --patch $simname \
+    --inpath $inpath \
+    --outpath $outpath \
+    --outlocal $locpath \
+    --logpath $locpath \
+    --loglevel 2 \
+    --gromacs gmx \
+    --mpi "gmx mdrun" \
+    --mdrunopt " -nb gpu -ntmpi 1 -ntomp $OMP_NUM_THREADS -pin off" \
+    --mini \
+    >> $outfile 2>&1
+
+  wait
