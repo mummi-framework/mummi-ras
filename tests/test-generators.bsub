@@ -1,0 +1,19 @@
+#!/bin/bash
+#BSUB -nnodes 1            # Number of nodes
+#BSUB -W 1:00              # Walltime
+#BSUB -G cancer            # Account
+#BSUB -J generate
+#BSUB -o generate-%J.log
+#BSUB -q pbatch
+#BSUB -alloc_flags ipisolate
+
+# Environment setup
+# source ~/.mummi/config.mummi.sh
+# source $MUMMI_APP/setup/setup.env.sh
+
+# Distributed setup
+export MASTER_ADDR=$(lrun -N1 -n1 hostname)
+export MASTER_PORT=23456
+
+## Launch multi-GPU generation
+lrun -T4 --gpubind=off python test-generators.py -n 1000

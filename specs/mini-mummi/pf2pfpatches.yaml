@@ -1,0 +1,71 @@
+macro_patch_creator:
+  env:
+
+  params:
+
+    max_frames_per_read: 4
+
+    # GC settings
+    is_gc: 1
+
+    sim2frame: {}
+
+    patch_psz:     30.0
+    macro_psz:     30.0
+    macro_gsz:     72
+
+    # non-GC settings
+    # starting iteration of the macro model
+    # sim2frame: {
+    #   test_c3_data: 1,
+    # }
+
+    # patch_psz:     30.0
+    # macro_psz:     1000.0
+    # macro_gsz:     2400
+    # nlipid_only: 33
+
+    # --------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
+    # path from where to read macro data
+      # leave empty to use SPLASH_ROOT/macro
+    # inpath:  '/g/g14/chavez35/tst_root_apr29/patch_data'
+    # if not empty, the cfield files are read from {inpath}/{binpath}
+    #binpath:    ''
+    #binpath:    'cfgbin'
+
+    # where to output the patches. leave empty for default.
+      # exact meaning depends upon fstype
+        # fstype = 'db':   outpath = dbr namespace   (default: <taken from config.yaml>)
+        # else         :   outpath = patch directory (default: SPLASH_ROOT/pfpatches)
+    # outpath:  ''
+    # chkpath:  ''
+
+    # --------------------------------------------------------------------------
+
+    # where to read the rdfs from
+      # exact meaning depends upon fstype
+        # fstype = 'db':   outpath = dbr namespace   (default: <taken from config.yaml>)
+        # else         :   outpath = patch directory (default: inpath/pfpatches)
+    rdf_inpath: ''
+    # --------------------------------------------------------------------------
+
+  config:
+    # --------------------------------------------------------------------------
+    # what type of file system to use (valid values: 'simple' / 'taridx' / 'redis' / 'mummi')
+    fstype:  'mummi'
+
+    # --------------------------------------------------------------------------
+    jobname:     macro_patch_creator
+    workspace:  ''      # empty workspace will point to SPLASH_ROOT/workspace
+
+    loglevel:   1
+    logpath:    ''      # empty logpath will use SPLASH_ROOT/workspacec
+
+    logfile:    0       # whether to write log to file
+                            # logfilename = logpath/jobname.log
+    logstdout:  1       # whether to write log to stdout
+                            # not a good idea to use both!
+    # cfield_log_freq: 1000  # Frequency to print out cfield messages
+
+    # --------------------------------------------------------------------------

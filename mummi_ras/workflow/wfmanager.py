@@ -1,8 +1,14 @@
-# Copyright (c) 2021, Lawrence Livermore National Security, LLC. All rights reserved. LLNL-CODE-827655.
-# This work was produced at the Lawrence Livermore National Laboratory (LLNL) under contract no. DE-AC52-07NA27344 (Contract 44) between the U.S. Department of Energy (DOE) and Lawrence Livermore National Security, LLC (LLNS) for the operation of LLNL.  See license for disclaimers, notice of U.S. Government Rights and license terms and conditions.
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# -----------------------------------------------------------------------------
+# Copyright (c) 2021, Lawrence Livermore National Security, LLC. All rights
+# reserved. LLNL-CODE-827655. This work was produced at the Lawrence Livermore
+# National Laboratory (LLNL) under contract no. DE-AC52-07NA27344 (Contract 44)
+# between the U.S. Department of Energy (DOE) and Lawrence Livermore National
+# Security, LLC (LLNS) for the operation of LLNL.  See license for disclaimers,
+# notice of U.S. Government Rights and license terms and conditions.
+# -----------------------------------------------------------------------------
+
 import os
 import signal
 import sys
@@ -11,23 +17,23 @@ import timeit
 import traceback
 import multiprocessing
 from multiprocessing.managers import SyncManager
+import pika
 
+import mummi_core
 from mummi_core.workflow.job import JOB_TYPES, JOB_NEXT_QUEUE
 from mummi_core.workflow.flux_env import flux_uri
 from mummi_core.workflow.jobTracker import JobTracker
-
-import mummi_core
-import mummi_ras
 from mummi_core.utils.timer import Timer
+from mummi_core.brokers import RPCClient
+
+import mummi_ras
 from mummi_ras import Naming
 from mummi_ras.transformations.patch_creator import MacroPatchCreator
-from mummi_ras.ml import PatchSelector, CGSelector, CGSelectorType
-from mummi_ras.feedback.feedback_manager_macro import MacroFeedbackManager, FeedbackManagerType
-from mummi_ras.feedback.feedback_manager_aatocg import FeedbackManager_AA2CG
+from mummi_ras.ml.selectors import CGSelector, CGSelectorType
+from mummi_ras.feedback import MacroFeedbackManager, FeedbackManagerType, FeedbackManager_AA2CG
 
 from logging import getLogger
 LOGGER = getLogger(__name__)
-
 
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
@@ -72,11 +78,12 @@ class WFManager():
         def handler(signum, frame):
             LOGGER.warning(f'Received (SIGNUM={signum}) for "{name}[pid={pid}]"'
                            f'frame "{frame.f_back}"')
-
+            self.checkpoint()
             traceback.print_exc()
             #self.exception_queue.put(sys.exc_info())
             #self.error()  # copied here but not sure if we want this
             #self.exit()
+            self.stop()
 
         return handler
 
@@ -106,6 +113,9 @@ class WFManager():
             self.do_patchcreation = bool(self.wconfig['do_patchcreation'])
             self.do_workflow = bool(self.wconfig['do_workflow'])
             self.do_schedulejobs = bool(self.wconfig['do_schedulejobs'])
+            self.do_mlserver = bool(self.wconfig['do_mlserver'])
+            self.do_ucgserver = bool(self.wconfig['do_ucgserver'])
+            assert self.do_mlserver ^ self.do_ucgserver, "Currently, we do not support ML and UCG server mode at the same time, please chose one"
 
             self.do_patchselection = bool(self.wconfig['do_patchselection'])
             self.do_feedback_cg2mc = bool(self.wconfig['do_feedback_cg2mc'])
@@ -125,7 +135,6 @@ class WFManager():
             self.nMaxSelectedCGFrameBuffer = int(self.wconfig['nMaxSelectedCGFrameBuffer'])
             LOGGER.info(f'buffers = {self.nMaxSelectedPatchBuffer}, {self.nMaxSelectedCGFrameBuffer}')
 
-
             self.nSecPerIterWF = int(self.wconfig['nSecPerIterWF'])
             self.nSecPerIterPC = int(self.wconfig['nSecPerIterPC'])
 
@@ -133,19 +142,23 @@ class WFManager():
 
             self.nSecPerMacroFeedback = int(self.wconfig['nSecPerMacroFeedback'])
             self.nSecPerCGFeedback = int(self.wconfig['nSecPerCGFeedback'])
+            self.iterCounterMLServer = int(self.wconfig['mlserver_round_id'])
+            self.iterCounterUCGServer = int(self.wconfig['ucgserver_round_id'])
+            self.generated_patches = [] # List of patches submitted to createsim
 
             # ------------------------------------------------------------------
             # identify scheduler interface
-            LOGGER.info(f'Workflow launched on host: {mummi_core.get_hostname()}')
+            self.hostname = mummi_core.get_hostname()
+            LOGGER.info(f'Workflow launched on host: {self.hostname}')
 
-            self.flux = flux_uri(override_uri=False)
-            LOGGER.info(f'  flux  uri: [{self.flux}]')
-            LOGGER.info(f'  local uri: [{os.environ.get("FLUX_URI", None)}]')
+            self.flux = flux_uri(override_uri_from_file=False)
+            LOGGER.info(f'  Flux  URI: [{self.flux}]')
+            LOGGER.info(f'  Local URI: [{os.environ.get("FLUX_URI", None)}]')
 
             if self.flux is None:
-                LOGGER.error('Failed to identify flux uri. Disabling job scheduling')
+                LOGGER.error('Failed to identify flux URI. Disabling job scheduling')
                 self.do_schedulejobs = False
-                assert False, 'Failed to identify flux uri'
+                assert False, 'Failed to identify flux URI'
 
             # ------------------------------------------------------------------
             # if no workspace has been specified, use the default in hierarchy
@@ -153,7 +166,6 @@ class WFManager():
             if self.workspace == '':
                 self.workspace = Naming.dir_root('workspace')
 
-            os.makedirs(self.workspace, exist_ok=True)
             LOGGER.info('workspace = {}'.format(self.workspace))
 
             # checkpoint will be in workspace
@@ -205,6 +217,19 @@ class WFManager():
         nnodes_tot = int(os.environ['MUMMI_NNODES'])
         nnodes_macro = int(os.environ.get('MUMMI_MACRO_NNODES', 0))
         nnodes_redis = int(os.environ.get('MUMMI_REDIS_NNODES', 0))
+        nnodes_mlserver = int(os.environ.get('MUMMI_MLSERVER_NNODES', 0))
+        nnodes_ucgserver = int(os.environ.get('MUMMI_UCGSERVER_NNODES', 0))
+        nnodes_feedbacks = int(os.environ.get('MUMMI_FB_NNODES', 0))
+
+        if self.do_mlserver and nnodes_mlserver == 0:
+            LOGGER.error('ML Server is supposed to be running but MUMMI_MLSERVER_NNODES is set to 0.')
+        if self.do_ucgserver and nnodes_ucgserver == 0:
+            LOGGER.error('UCG Server is supposed to be running but MUMMI_UCGSERVER_NNODES is set to 0.')
+
+        portion_csim = float(self.wconfig['portion_csim'])
+        portion_cg = float(self.wconfig['portion_cg'])
+        assert 0 <= portion_csim <= 1
+        assert 0 <= portion_cg <= 1
 
         # Fixed cost Infrastructure nodes
         nnodes_flux = 0   # Dedicated full node for Flux
@@ -212,46 +237,67 @@ class WFManager():
 
         # Node computations
         nnodes_tot = nnodes_tot - nnodes_flux
+        nnodes_mlserver = 0 # ML server and wfmanger are co-located but ML server needs one GPU
+
+        # For GROMACS we move to vertical scheduling (cganalysis alone on the node and createsims alone, no sharing anymore)
+        nnodes_tot = nnodes_tot - (nnodes_wf + nnodes_feedbacks + nnodes_macro + nnodes_redis + nnodes_mlserver + nnodes_ucgserver)
         nnodes_gpu = nnodes_tot
-        nnodes_cpu = nnodes_tot - (nnodes_wf + nnodes_macro + nnodes_redis)
+        nnodes_cpu = nnodes_tot # createsims uses GPU in that version
+        # For GROMACS we cannot have more than 1 as createsims and cganalysis use GPUs (4 per nodes)
+        self.nnodes_csim : int = max(0, int(nnodes_gpu * portion_csim))
+        self.nnodes_cg : int = max(0, nnodes_gpu - self.nnodes_csim)
+        # END For GROMACS section
 
-        portion_csim = float(self.wconfig['portion_csim'])
-        portion_cg = float(self.wconfig['portion_cg'])
-        assert 0 <= portion_csim <= 1
-        assert 0 <= portion_cg <= 1
+        # Classic ddcMD section 
+        # nnodes_gpu = nnodes_tot
+        # nnodes_cpu = nnodes_tot - (nnodes_wf + nnodes_macro + nnodes_redis + nnodes_mlserver + nnodes_ucgserver)
 
-        nnodes_csim : int = int(nnodes_cpu * portion_csim)
-        nnodes_cg : int = int(nnodes_gpu * portion_cg)
-        nnodes_bmap : int = nnodes_cpu - nnodes_csim
-        nnodes_aa : int = nnodes_gpu - nnodes_cg
+        # self.nnodes_csim : int = int(nnodes_cpu * portion_csim)
+        # self.nnodes_cg : int = int(nnodes_gpu * portion_cg)
+
+        # self.nnodes_bmap : int = max(0, nnodes_cpu - self.nnodes_csim)
+        # self.nnodes_aa : int = max(0, nnodes_gpu - self.nnodes_cg)
+
+        # WARNING: we are not using these jobs at the moment
+        self.nnodes_bmap : int = 0
+        self.nnodes_aa : int = 0
 
         LOGGER.info(f'NNodes: total = {nnodes_tot}: '
-                    f'(csim = {nnodes_csim}, cg = {nnodes_cg},'
-                    f' bmap = {nnodes_bmap}, aa = {nnodes_aa})')
+                    f'(wf = {nnodes_wf}, redis = {nnodes_redis},'
+                    f' macro = {nnodes_macro}, mlserver = {nnodes_mlserver}'
+                    f' ucgserver = {nnodes_ucgserver}, feeedback = {nnodes_feedbacks})')
+
+        LOGGER.info(f'NNodes: total = {nnodes_tot}: '
+                    f'(csim = {self.nnodes_csim}, cg = {self.nnodes_cg},'
+                    f' bmap = {self.nnodes_bmap}, aa = {self.nnodes_aa})')
 
         # ----------------------------------------------------------------------
         self.job_trackers = {
             'createsim': JobTracker(self.config['createsim'],
-                            nnodes_csim, self.iointerface,
+                            self.nnodes_csim, self.iointerface,
                             self.adapter_batch,
+                            self.workspace,
                             self.do_schedulejobs),
                             # self.exception_queue, self.do_schedulejobs),
 
             'cg': JobTracker(self.config['cg'],
-                            nnodes_cg, self.iointerface,
+                            self.nnodes_cg, self.iointerface,
                             self.adapter_batch,
+                            self.workspace,
                             self.do_schedulejobs),
                             # self.exception_queue, self.do_schedulejobs),
 
             'backmapping': JobTracker(self.config['backmapping'],
-                            nnodes_bmap, self.iointerface,
+                            self.nnodes_bmap, self.iointerface,
                             self.adapter_batch,
+                            self.workspace,
                             self.do_schedulejobs),
                             # self.exception_queue, self.do_schedulejobs),
 
             'aa': JobTracker(self.config['aa'],
-                            nnodes_aa, self.iointerface,
+                            self.nnodes_aa, self.iointerface,
                             self.adapter_batch,
+                            self.workspace,
                             self.do_schedulejobs)
                             # self.exception_queue, self.do_schedulejobs)}
         }
@@ -304,17 +350,17 @@ class WFManager():
                                                self.iointerface, self.iointerface)
         self.patch_creator.restore()
 
-    def _init_patch_selection(self):
+    # def _init_patch_selection(self):
 
-        self.pselector = None
-        if self.do_patchselection or self.do_feedback_cg2mc:
-            ml_config = Naming.ml('macro')
-            stype = ml_config['selection']
-            assert stype in ['importance', 'random']
+    #     self.pselector = None
+    #     if self.do_patchselection or self.do_feedback_cg2mc:
+    #         ml_config = Naming.ml('macro')
+    #         stype = ml_config['selection']
+    #         assert stype in ['importance', 'random']
 
-            wspace = os.path.join(Naming.dir_root('ml'), 'macro')
-            self.pselector = self.proxy_manager.PatchSelector(stype, wspace, ml_config)
-            self.pselector.restore()
+    #         wspace = os.path.join(Naming.dir_root('ml'), 'macro')
+    #         self.pselector = self.proxy_manager.PatchSelector(stype, wspace, ml_config)
+    #         self.pselector.restore()
 
     def _init_cg_selection(self):
 
@@ -388,20 +434,126 @@ class WFManager():
 
         # ----------------------------------------------------------------------
 
+    def _init_ml_server(self):
+        """
+        Initialize the client on the workflow side to talk to the ML Server.
+        March 2023: 
+            Current implementation supports only RabbitMQ, currently the ML server connect to
+            a RabbitMQ server running on a Kubernetes cluster (defined in the credentials).
+            The ML server is responsible of sampling, generating and validating new structures
+            for the wfmanager.
+        """
+        if self.do_mlserver:
+            if Naming.MUMMI_MINI:
+                spath = os.path.join(mummi_ras.Naming.MUMMI_SPECS, "mini-mummi")
+            else:
+                spath = os.path.join(mummi_ras.Naming.MUMMI_SPECS, "workflow")
+
+            config = mummi_core.read_specs(os.path.join(spath, "mlserver.yaml"))
+
+            wspace = config["workspace"]["path"]
+            credentials_path = os.path.join(wspace,
+                config["workspace"]["credentials"]
+            )   
+            certificate_path = os.path.join(wspace,
+                config["workspace"]["certificate"]
+            )
+
+            usr = os.environ.get("USER", "mummiusr")
+            routing_key = config["broker"]["queue"] + '_' + usr
+            if usr == "mummiusr":
+                LOGGER.warning(f"Did not find current user: defaulted to {usr}")
+            broker_interface = config["broker"]["interface"]
+            try:
+                # interface = get_broker(broker_interface)
+                self.rpc_client = RPCClient(
+                    credentials = credentials_path,
+                    cacert = certificate_path,
+                    routing_key = routing_key,
+                )
+            except Exception as e:
+                traceback.print_exc()
+                LOGGER.error("ML Server failed during setup!")
+                self.error()
+                raise e
+
+            LOGGER.info(f"> Initializing RPC client to interact with ML Server")
+            LOGGER.info(f"  > Client")
+            LOGGER.info(f"    > Interface   {broker_interface}")
+            LOGGER.info(f"    > Credentials {credentials_path}")
+            LOGGER.info(f"    > Certificate {certificate_path}")
+            LOGGER.info(f"    > Routing key {routing_key}")
+
+    def _init_ucg_server(self):
+        """
+        Initialize the client on the workflow side to talk to the UCG Server.
+        June 2023: 
+            Current implementation supports only RabbitMQ, currently the UCG server connect to
+            a RabbitMQ server running on a Kubernetes cluster (defined in the credentials).
+            The UCG server is responsible of reading trajectories, selecting, generating 
+            and validating new structures for the wfmanager.
+        """
+        if self.do_ucgserver:
+            if Naming.MUMMI_MINI:
+                spath = os.path.join(mummi_ras.Naming.MUMMI_SPECS, "mini-mummi")
+            else:
+                spath = os.path.join(mummi_ras.Naming.MUMMI_SPECS, "workflow")
+
+            config = mummi_core.read_specs(os.path.join(spath, "ucgserver.yaml"))
+
+
+            wspace = config["workspace"]["path"]
+            credentials_path = os.path.join(wspace,
+                config["workspace"]["credentials"]
+            )
+            certificate_path = os.path.join(wspace,
+                config["workspace"]["certificate"]
+            )
+
+            usr = os.environ.get("USER", "mummiusr")
+            routing_key = config["broker"]["queue"] + '_' + usr
+            if usr == "mummiusr":
+                LOGGER.warning(f"Did not find current user: defaulted to {usr}")
+            broker_interface = config["broker"]["interface"]
+            try:
+                self.rpc_client = RPCClient(
+                    credentials = credentials_path,
+                    cacert = certificate_path,
+                    routing_key = routing_key,
+                )
+            except Exception as e:
+                traceback.print_exc()
+                LOGGER.error("UCG Server failed during setup!")
+                self.error()
+                raise e
+
+            LOGGER.info(f"> Initializing RPC client to interact with UCG Server")
+            LOGGER.info(f"  > Client")
+            LOGGER.info(f"    > Interface   {broker_interface}")
+            LOGGER.info(f"    > Credentials {credentials_path}")
+            LOGGER.info(f"    > Certificate {certificate_path}")
+            LOGGER.info(f"    > Routing key {routing_key}")
+
     # --------------------------------------------------------------------------
     def checkpoint(self):
 
         state = dict(
-            flux=self.flux,
-            iterCounterWF=self.iterCounterWF,
-            iterCounterPC=self.iterCounterPC,
-            patchCounter=self.patchCounter,
-            jobs_createsim=self.job_trackers['createsim'].status(),
-            jobs_backmapping=self.job_trackers['backmapping'].status(),
-            jobs_cg=self.job_trackers['cg'].status(),
-            jobs_aa=self.job_trackers['aa'].status())
+            flux = self.flux,
+            iterCounterWF = self.iterCounterWF,
+            iterCounterPC = self.iterCounterPC,
+            patchCounter = self.patchCounter,
+            jobs_createsim = self.job_trackers['createsim'].status(),
+            jobs_backmapping = self.job_trackers['backmapping'].status(),
+            jobs_cg = self.job_trackers['cg'].status(),
+            jobs_aa = self.job_trackers['aa'].status())
 
-        self.iointerface.save_checkpoint(self.chkpt, state, use_tstamp=True)
+        # We keep the two last checkpoints
+        self.iointerface.save_checkpoint(self.chkpt,
+            state,
+            use_tstamp=True,
+            cleanup=True,
+            keep_checkpoint=2
+        )
 
     def restore(self):
 
@@ -448,7 +600,9 @@ class WFManager():
     def _task_add_new_patches_to_ml(self, lock_patch_io, lock_patch_select):
 
         if not self.do_patchselection:
+            LOGGER.debug(f"No patchselection as do_patchselection = {self.do_patchselection}")
             return 0
+        LOGGER.debug(f"Patch selection started")
 
         p = multiprocessing.current_process()
 
@@ -491,7 +645,9 @@ class WFManager():
     def _task_add_cgframes_to_ml(self):
 
         if not self.do_cgselection:
+            LOGGER.debug(f"No cgselection as do_cgselection = {self.do_patchselection}")
             return 0
+        LOGGER.debug(f"CG selection started")
 
         ctime = timeit.default_timer() - self.timeOfLastCgSelUpdate
         if ctime < self.nSecPerCgSelUpdate:
@@ -513,11 +669,14 @@ class WFManager():
                           self.job_trackers['createsim'].nqueued_sims() + \
                           self.job_trackers['createsim'].nrunning_sims()
 
-        LOGGER.debug(f"pending patches = {nPendingPatches} = {self.job_trackers['cg'].nqueued_sims()} + {self.job_trackers['createsim'].nqueued_sims()} + {self.job_trackers['createsim'].nrunning_sims()}")
+        LOGGER.debug(f"pending patches = {nPendingPatches} = {self.job_trackers['cg'].nqueued_sims()} "
+                     f"+ {self.job_trackers['createsim'].nqueued_sims()} "
+                     f"+ {self.job_trackers['createsim'].nrunning_sims()}")
         nPatches = min(self.nMaxSelectedPatchBuffer - nPendingPatches,
                        self.nMaxPatchesSelectionsPerIter)
 
-        LOGGER.debug(f"npatches = {nPatches} = min({self.nMaxSelectedPatchBuffer} - {nPendingPatches}, {self.nMaxPatchesSelectionsPerIter}")
+        LOGGER.debug(f"npatches = {nPatches} = min({self.nMaxSelectedPatchBuffer} "
+                     f"- {nPendingPatches}, {self.nMaxPatchesSelectionsPerIter}")
 
         if nPatches <= 0:
             return 0
@@ -536,7 +695,9 @@ class WFManager():
             return n
 
         # test these selections
-        _s, _f, _u = self.job_trackers['createsim'].split_sims_on_status(selections)
+        # Split a list of sims based on their status.
+        # Returns: sims_success, sims_failed, sims_unknown
+        _s, _f, _u, _stop = self.job_trackers['createsim'].split_sims_on_status(selections)
 
         # this is the correct scenario
         if len(_s) == 0 and len(_f) == 0:
@@ -551,6 +712,180 @@ class WFManager():
 
         return n
 
+    def _request_ml_structures(self, nPatches: int):
+        selections = self.rpc_client.call({'k_samples': nPatches, 'iteration_id': self.iterCounterMLServer, 'strict': False})
+        if isinstance(selections, str):
+            LOGGER.error(f"[.] RPC server sent back an exception: {selections}")
+            self.checkpoint()
+            return []
+        selections = [x.split('/')[-1] for x in selections]
+        LOGGER.info(f" [.] Got generate_new_samples(iter={self.iterCounterMLServer}, k={nPatches}) = {selections}")
+        for sample in selections:
+            if sample in self.generated_patches:
+                LOGGER.error(f"Sample {sample} has already been generated. This will cause trouble. {sample} should be removed.")
+        self.generated_patches += selections
+        return selections
+
+    # --------------------------------------------------------------------------
+    # Instead of using PatchSelector we query the ML Server for structures to
+    # to give to createsim
+    # --------------------------------------------------------------------------
+    def _task_add_new_patches_mlserver(self):
+        if not self.do_mlserver:
+            return 0
+
+        # Running and Queued CG represent a certain number of createsims that have been executed in the past
+        # Running Createsims represent the current createsim running
+        # Queued Createsims represent the future createsim that will be run at some point.
+        nPendingPatches = self.job_trackers['cg'].nqueued_sims() + \
+                          self.job_trackers['createsim'].nqueued_sims() + \
+                          self.job_trackers['createsim'].nrunning_sims()
+
+        LOGGER.info(f"pending patches = {nPendingPatches} = {self.job_trackers['cg'].nqueued_sims()} "
+                    f"+ {self.job_trackers['createsim'].nqueued_sims()} "
+                    f"+ {self.job_trackers['createsim'].nrunning_sims()}")
+        nPatches = min(self.nMaxSelectedPatchBuffer - nPendingPatches, self.nMaxPatchesSelectionsPerIter)
+
+        LOGGER.info(f"npatches => min({self.nMaxSelectedPatchBuffer} - {nPendingPatches}, "
+                    f"{self.nMaxPatchesSelectionsPerIter}) = {nPatches}")
+
+        # We have enough patches
+        if nPatches <= 0:
+            return 0
+
+        # if nPatches is too small and the ML model success rate is low (<40%)
+        # Then requesting 5 or 10 will never return valid patches statistically
+        if nPatches < self.nMaxPatchesSelectionsPerIter:
+            nPatches = self.nMaxPatchesSelectionsPerIter
+
+        # select new patches
+        p = multiprocessing.current_process()
+        LOGGER.debug(f"> Running RPC client {p.name} on [{self.hostname}/{p.pid}]")
+        LOGGER.info(f" [x] Requesting generate_new_samples(iter={self.iterCounterMLServer}, k={nPatches})")
+        # If strict equal True then call() will ALWAYS return the requested number of VALID patches (but it will take longer to run)
+        selections = []
+        try:
+            # selections = self.rpc_client.call({'k_samples': nPatches, 'iteration_id': self.iterCounterMLServer, 'strict': False})
+            # if isinstance(selections, str):
+            #     LOGGER.error(f"[.] RPC server sent back an exception: {selections}")
+            #     self.checkpoint()
+            #     # self.stop()
+            #     return -1
+            # selections = [x.split('/')[-1] for x in selections]
+            # LOGGER.info(f" [.] Got generate_new_samples(iter={self.iterCounterMLServer}, k={nPatches}) = {selections}")
+            # for sample in selections:
+            #     if sample in self.generated_patches:
+            #         LOGGER.error(f"Sample {sample} has already been generated. This will cause trouble. {sample} should be removed.")
+            # self.generated_patches += selections
+            selections = self._request_ml_structures(nPatches)
+        except pika.exceptions.AMQPError as e:
+            # we try to restart the connection
+            LOGGER.warning(f"We got {e}")
+            LOGGER.info(f"We try to reinitialize the connection with ML server")
+            self._init_ml_server()
+            LOGGER.info(f"Connection to ML server reinitialized.")
+            # Retrying
+            LOGGER.info(f" [x] Requesting generate_new_samples(iter={self.iterCounterMLServer}, k={nPatches})")
+            selections = self._request_ml_structures(nPatches)
+
+        n = len(selections)
+        if n == 0:
+            return n
+
+        # test these selections
+        # Split a list of sims based on their status.
+        # Returns: sims_success, sims_failed, sims_unknown, sims_stop
+        sims_success, sims_failed, sims_unknown, sims_stop = self.job_trackers['createsim'].split_sims_on_status(selections)
+
+        LOGGER.debug(f"Found sims_success = {sims_success}, sims_failed = {sims_failed}, sims_unknown= {sims_unknown}, sims_unknown= {sims_stop}")
+
+        # this is the correct scenario (the new patches have not been explored yet)
+        if len(sims_success) == 0 and len(sims_failed) == 0:
+            self.job_trackers['createsim'].add_to_queue(selections)
+
+        # looks like some of these selections were already simulated
+        else:
+            LOGGER.error('Found (%d %d) selected patches for which createsim was already run. '
+                         'Were you using old sims with new ML?', len(sims_success), len(sims_failed))
+            self.job_trackers['createsim'].add_to_queue(sims_unknown)
+            self.job_trackers['cg'].add_to_queue(sims_success)
+
+        return n
+
+    def _task_add_new_patches_ucgserver(self):
+        if not self.do_ucgserver:
+            return 0
+
+        # Running and Queued CG represent a certain number of createsims that have been executed in the past
+        # Running Createsims represent the current createsim running
+        # Queued Createsims represent the future createsim that will be run at some point.
+        nPendingPatches = self.job_trackers['cg'].nqueued_sims() + \
+                          self.job_trackers['createsim'].nqueued_sims() + \
+                          self.job_trackers['createsim'].nrunning_sims()
+
+        LOGGER.info(f"pending patches = {nPendingPatches} = {self.job_trackers['cg'].nqueued_sims()} "
+                    f"+ {self.job_trackers['createsim'].nqueued_sims()} "
+                    f"+ {self.job_trackers['createsim'].nrunning_sims()}")
+        nPatches = min(self.nMaxSelectedPatchBuffer - nPendingPatches, self.nMaxPatchesSelectionsPerIter)
+
+        LOGGER.info(f"npatches => min({self.nMaxSelectedPatchBuffer} - {nPendingPatches}, "
+                    f"{self.nMaxPatchesSelectionsPerIter} = {nPatches})")
+
+        if nPatches <= 0:
+            return 0
+
+        # select new patches
+        p = multiprocessing.current_process()
+        LOGGER.debug(f"> Running RPC client {p.name} on [{self.hostname}/{p.pid}]")
+        LOGGER.info(f" [x] Requesting generate_new_samples(iter={self.iterCounterUCGServer}, k={nPatches})")
+        # If strict equal True then call() will always return the requested number of VALID patches (but it will take longer to run)
+        selections = []
+        try:
+            selections = self.rpc_client.call({'k_samples': nPatches, 'iteration_id': self.iterCounterUCGServer, 'strict': False})
+            if isinstance(selections, str):
+                LOGGER.error(f"[.] RPC server sent back an exception: {selections}")
+                self.checkpoint()
+                # self.stop()
+                return -1
+            LOGGER.info(f" [.] Got generate_new_samples(iter={self.iterCounterUCGServer}, k={nPatches}) = {selections}")
+            selections = [x.split('/')[-1] for x in selections]
+
+            for sample in selections:
+                if sample in self.generated_patches:
+                    LOGGER.warning(f"Sample {sample} has already been generated. This will cause trouble. {sample} should be removed.")
+            self.generated_patches += selections
+        except pika.exceptions.AMQPError as e:
+            # we try to restart the connection
+            LOGGER.warning(f"We got {e}")
+            LOGGER.info(f"We try to reinitialize the connection with UCG server")
+            self._init_ucg_server()
+            LOGGER.info(f"Connection to UCG server reinitialized.")
+            return 0
+
+        n = len(selections)
+        if n == 0:
+            return n
+
+        # test these selections
+        # Split a list of sims based on their status.
+        # Returns: sims_success, sims_failed, sims_unknown
+        sims_success, sims_failed, sims_unknown, _ = self.job_trackers['createsim'].split_sims_on_status(selections)
+
+        LOGGER.debug(f"Found sims_success = {sims_success}, sims_failed = {sims_failed}, sims_unknown= {sims_unknown}")
+
+        # this is the correct scenario (the new patches have not been explored yet)
+        if len(sims_success) == 0 and len(sims_failed) == 0:
+            self.job_trackers['createsim'].add_to_queue(selections)
+
+        # looks like some of these selections were already simulated
+        else:
+            LOGGER.error('Found (%d %d) selected patches for which createsim was already run. '
+                         'Were you using old sims with new ML?', len(sims_success), len(sims_failed))
+            self.job_trackers['createsim'].add_to_queue(sims_unknown)
+            self.job_trackers['cg'].add_to_queue(sims_success)
+
+        return n
+
     # --------------------------------------------------------------------------
     def _task_select_cgframes(self):
 
@@ -561,12 +896,15 @@ class WFManager():
                           self.job_trackers['backmapping'].nqueued_sims() + \
                           self.job_trackers['backmapping'].nrunning_sims()
 
-        LOGGER.debug(f"pending frames = {nPendingFrames} = {self.job_trackers['aa'].nqueued_sims()} + {self.job_trackers['backmapping'].nqueued_sims()} + {self.job_trackers['backmapping'].nrunning_sims()}")
+        LOGGER.debug(f"pending frames = {nPendingFrames} = {self.job_trackers['aa'].nqueued_sims()} "
+                     f"+ {self.job_trackers['backmapping'].nqueued_sims()} "
+                     f"+ {self.job_trackers['backmapping'].nrunning_sims()}")
 
         nFrames = min(self.nMaxSelectedCGFrameBuffer - nPendingFrames,
                        self.nMaxCGFramesSelectionsPerIter)
 
-        LOGGER.debug(f"nframes = {nFrames} = min({self.nMaxSelectedCGFrameBuffer} - {nPendingFrames}, {self.nMaxCGFramesSelectionsPerIter}")
+        LOGGER.debug(f"nframes = {nFrames} = min({self.nMaxSelectedCGFrameBuffer} "
+                     f"- {nPendingFrames}, {self.nMaxCGFramesSelectionsPerIter}")
 
         if nFrames <= 0:
             return 0
@@ -583,7 +921,9 @@ class WFManager():
         selections = [s.id for s in selections]
 
         # test these selections
-        _s, _f, _u = self.job_trackers['backmapping'].split_sims_on_status(selections)
+        # Split a list of sims based on their status.
+        # Returns: sims_success, sims_failed, sims_unknown, sims_stop
+        _s, _f, _u, _ = self.job_trackers['backmapping'].split_sims_on_status(selections)
 
         # this is the correct scenario
         if len(_s) == 0 and len(_f) == 0:
@@ -609,22 +949,31 @@ class WFManager():
         # first, we will update job tracker
         for j in JOB_TYPES:
             succeeded[j], failed[j] = self.job_trackers[j].update()
+            LOGGER.debug(f"   JOB_TYPES={j} and self.job_trackers[{j}] = {self.job_trackers[j]}")
+
+        LOGGER.debug('succeeded = {} and failed = {}'.format(succeeded, failed))
 
         # ----------------------------------------------------------------------
         # add the finished jobs to the next queue!
         for j in JOB_NEXT_QUEUE.keys():
             fjobs = succeeded[j]
             if len(fjobs) > 0:
-                LOGGER.info('Found {} successful {} sims. next, queue them to {}!'.format(len(fjobs), j, JOB_NEXT_QUEUE[j]))
+                LOGGER.debug('Found {} successful {} sims. next, queue them to {}!'.format(len(fjobs), j, JOB_NEXT_QUEUE[j]))
                 self.job_trackers[JOB_NEXT_QUEUE[j]].add_to_queue(fjobs)
 
+        LOGGER.debug('JOB_NEXT_QUEUE = {}'.format(JOB_NEXT_QUEUE.keys()))
         # ----------------------------------------------------------------------
         # finally, we will start any new jobs!
+        LOGGER.debug(f"JOB_TYPES = {JOB_TYPES} started = {started}")
         for j in JOB_TYPES:
+            LOGGER.debug(f"   JOB_TYPES={j} and self.job_trackers[{j}] = {self.job_trackers[j]}")
             nJobs, started[j] = self.job_trackers[j].start_jobs(self.nMaxJobsPerIter)
+            LOGGER.debug(f"   nJobs={nJobs}, started[{j}]={started[j]}")
 
+        LOGGER.debug(f"started = {started}, succeeded = {succeeded}, failed = {failed}")
         # ----------------------------------------------------------------------
         # return the dictionaries?
+        return started, succeeded, failed
 
 
     # --------------------------------------------------------------------------
@@ -633,16 +982,27 @@ class WFManager():
     def run_workflow(self, n, lock_patch_io, lock_patch_select):
 
         p = multiprocessing.current_process()
-        signal.signal(signal.SIGTERM, self.signal_wrapper('workflow', p.pid))
-
+        signal.signal(signal.SIGTERM, self.signal_wrapper("workflow", p.pid))
+        signal.signal(signal.SIGINT, self.signal_wrapper("workflow", p.pid))
         # ----------------------------------------------------------------------
         try:
             self._init_scheduling()
             self._init_cg_selection()
             if self.do_gc:
                self._init_patch_creation()
-
+            if self.do_mlserver:
+                self._init_ml_server()
+            if self.do_ucgserver:
+                self._init_ucg_server()
             self.restore()
+
+            previously_ckpt_jobs = 0
+            for j in JOB_TYPES:
+                previously_ckpt_jobs += self.job_trackers[j].nrunning_jobs() + self.job_trackers[j].nqueued_sims()
+
+            if previously_ckpt_jobs == 0:
+                LOGGER.info(f"No previously checkpointed jobs found (={previously_ckpt_jobs}) in checkpoints, starting workflow")
+                self._wf_ready.set()
 
             slp_time = 0
             loop_timer = Timer()
@@ -656,15 +1016,13 @@ class WFManager():
                 # --------------------------------------------------------------
                 # in the restore phase, let's focus only on starting the jobs
                 if not self._wf_ready.is_set():
-
-                    LOGGER.info('Doing restore phase')
                     njobs_remaining = 0
                     for j in JOB_TYPES:
                         self.job_trackers[j].start_jobs(self.nMaxJobsPerIter)
                         njobs_remaining += self.job_trackers[j].njobs_2start()
 
                     if njobs_remaining <= 0:
-                        LOGGER.info('Concluding restore phase')
+                        LOGGER.info("Concluding restore phase")
                         self._wf_ready.set()   # kick off other processes
 
                 # --------------------------------------------------------------
@@ -672,29 +1030,48 @@ class WFManager():
                 else:
                     # ----------------------------------------------------------
                     # task 1: read new patches/cg frames and add to ML selectors
+                    
+                    # Option 1. using ML (Latent Space) server to generate and select patches
+                    self._task_add_new_patches_mlserver()
+                    # Option 2. Using UCG server to generate and select patches
+                    self._task_add_new_patches_ucgserver()
+                    # Option 3. Using PatchCreator with macro model to create patches (these patches will be selected below)
                     self._task_add_new_patches_to_ml(lock_patch_io, lock_patch_select)
+
+                    LOGGER.profile('    > Iteration {}: added new patches'.format(self.iterCounterWF))
                     self._task_add_cgframes_to_ml()
+                    if self.do_cgselection:
+                        LOGGER.profile('    > Iteration {}: added CG frame patches'.format(self.iterCounterWF))
 
                     # ----------------------------------------------------------
                     # 2021.02.07: HB moved this task up
                     # task 2: start the jobs
                     self._task_update_jobs()
+                    LOGGER.profile('    > Iteration {}: updated jobs'.format(self.iterCounterWF))
 
                     # ----------------------------------------------------------
                     # task 3: select new candidates for simulations
                     self._task_select_pfpatches(lock_patch_select)
+                    if self.do_patchselection:
+                        LOGGER.profile('    > Iteration {}: selected patches'.format(self.iterCounterWF))
+
                     self._task_select_cgframes()
+                    if self.do_cgselection:
+                        LOGGER.profile('    > Iteration {}: select CG frames'.format(self.iterCounterWF))
 
                     # ----------------------------------------------------------
                     # validate state and checkpoint
                     if self.do_patchselection:
                         self.pselector.test()
+                        LOGGER.profile('    > Iteration {}: patch selector test'.format(self.iterCounterWF))
                     if self.do_cgselection:
                         self.cgselector.test()
+                        LOGGER.profile('    > Iteration {}: CG selector test'.format(self.iterCounterWF))
 
                 # --------------------------------------------------------------
                 for j in JOB_TYPES:
                     self.job_trackers[j].test()
+                LOGGER.profile('    > Iteration {}: testing all jobs'.format(self.iterCounterWF))
                 self.checkpoint()
 
                 # ------------------------------------------------------------------
@@ -705,7 +1082,8 @@ class WFManager():
                 loop_time = loop_timer.elapsed()
                 self.iterCounterWF += 1
 
-                slp_time = 0 # max(0, self.nSecPerIterWF - loop_time)
+                # slp_time = 0 # max(0, self.nSecPerIterWF - loop_time)
+                slp_time = max(0, self.nSecPerIterWF - loop_time)
                 LOGGER.debug('{} waiting for {} seconds'.format(p.name, slp_time))
 
             LOGGER.debug("AFTER LOOP: Workflow loop ending.")
@@ -899,6 +1277,7 @@ class WFManager():
     def stop(self):
         LOGGER.info('marking the wfmanager to stop!')
         self.exit()
+        sys.exit(1)
 
     def join(self):
         for key, process in self.processes.items():
@@ -912,20 +1291,20 @@ class WFManager():
 
         self._setup.wait()
 
-        s = 'gc = {}, patchcreation = {}, workflow = {}, feedback = {}/{}, schedulejobs = {}'
-        s = s.format(self.do_gc, self.do_patchcreation, self.do_workflow,
-                     self.do_feedback_cg2mc, self.do_feedback_aa2cg,
-                     self.do_schedulejobs)
+        s = "gc = {}, patchcreation = {}, workflow = {}, mlserver = {}, ucgserver = {}, feedback = {}/{}, schedulejobs = {}"
+        s = s.format(self.do_gc, self.do_patchcreation, self.do_workflow, self.do_mlserver, self.do_ucgserver,
+                     self.do_feedback_cg2mc, self.do_feedback_aa2cg, self.do_schedulejobs)
 
-        LOGGER.info('Starting workflow_manager ({})'.format(s))
+        LOGGER.info("Starting workflow_manager ({})".format(s))
         lock_patch_io = multiprocessing.Lock()
         lock_patch_select = multiprocessing.Lock()
 
         # ----------------------------------------------------------------------
-        ProxyManager.register('PatchSelector', PatchSelector)
-        self.proxy_manager = ProxyManager()
-        self.proxy_manager.start()
-        self._init_patch_selection()
+        # May 14, 2024: PatchSelector is deprecated for now
+        # ProxyManager.register("PatchSelector", PatchSelector)
+        # self.proxy_manager = ProxyManager()
+        # self.proxy_manager.start()
+        # self._init_patch_selection()
 
         # ----------------------------------------------------------------------
         if self.do_patchcreation and not self.do_gc:

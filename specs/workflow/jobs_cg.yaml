@@ -8,12 +8,11 @@ config:
 
   nnodes:     1
   nprocs:     1
-  cores per task: 3 # 3 summit use 5 on lassen
+  cores per task: 7 # 7 frontier / 3 summit / 5 on lassen
   ngpus:      1
 
-  use_broker: True
-  #addtl_args:  # not needed anymore for new flux
-  #  mpi: spectrum
+  # If this job is nested (run inside batch ob)
+  nested: True
 
 imports:  # possibly needed for any evals
   - mummi_ras
@@ -31,9 +30,9 @@ variables:
 
 script: |
 
-  module load $MUMMI_MPI_MODULE
-  spack load ddcmd
+  spack load gromacs~mpi+rocm+mummi-c2 target=$(spack arch --target)
   export OMPI_COMM_WORLD_RANK=1
+  export OMP_NUM_THREADS=6
 
   simname={simname}
   outpath={outpath}
@@ -45,37 +44,47 @@ script: |
   echo ">> outpath  = $outpath"
   echo ">> locpath  = $locpath"
   echo ">> fbpath   = $fbpath"
-  echo ">> ddcmd    =" `which ddcmd_gpu`
-  echo ">> autobind =" `which autobind-12`
+  echo ">> gmx      =" `which gmx`
+  echo ">> pwd      =" `pwd`
+  echo ">> hostname =" `hostname`
 
   mkdir -p $locpath; cd $locpath
 
-  cp $outpath/ConsAtom.data                         $locpath/
-  cp $outpath/martini.data                          $locpath/
-  cp $outpath/molecule.data                         $locpath/
-  cp $outpath/object.data                           $locpath/
-  cp $outpath/restraint.data                        $locpath/
   cp $outpath/topol.tpr                             $locpath/
-  cp $outpath/lipids-water-eq4.gro                  $locpath/
-  cp $outpath/POPX_Martini_v2.0_lipid.itp           $locpath/
-  cp $outpath/resItpList                            $locpath/
+  cp $outpath/lipids-water-eq6.gro                  $locpath/
+  cp $outpath/state.cpt                             $locpath/ 2>/dev/null
+  cp $outpath/traj_comp.xtc                         $locpath/ 2>/dev/null
+  cp $outpath/ener.edr                              $locpath/ 2>/dev/null
+  cp $outpath/md.log                                $locpath/ 2>/dev/null
+  cp $outpath/mdrun.log                             $locpath/ 2>/dev/null
+  cp $outpath/cg_analysis.log                       $locpath/ 2>/dev/null
+  cp $outpath/cg_analysis.out                       $locpath/ 2>/dev/null
+  cp -P $outpath/restart                            $locpath/ 2>/dev/null
+  cp $(readlink -f $outpath/restart)                $locpath/ 2>/dev/null  
 
-  cp -P $outpath/restart                            $locpath/
-  cp -r $(dirname `readlink -f $outpath/restart`)   $locpath/
-
-  # NOTE: changed to avoid curly brace collision
-  rs=`readlink -f $locpath/restart`
-  sname=`basename $(dirname $rs)`
-  snum=$(echo $sname | cut -f2 -d".")
-
-  if [ -n "$snum" ] && [ "$snum" -eq "$snum" ] 2>/dev/null; then
-    cframe=`expr $snum + 25000`
+  # if we found some XTC then we take the most recent
+  xtclast=$(ls --color=none $outpath/traj_comp.step*.xtc 2>/dev/null | sort -r | head -n 1)
+  if [ -z $xtclast ]; then  
+    cframe=0
   else
-    cframe=25000
+    cframe=$(echo $(basename $xtclast) | tr -d -c 0-9)
+    cp $xtclast                            $locpath/
   fi
+  echo ">> xtclast = $xtclast, cframe = $cframe"
 
-  $(LAUNCHER) sh -c "autobind-12 mummi_cganalysis  -c  -d 2  --simname $simname  --path $locpath  --pathremote $outpath  --siminputs $outpath  --fstype mummi  --fbio mummi  --simbin ddcmd_gpu  --maxsimtime 250000000  --frameProcessBatchSize 5  --fcount $cframe  --nprocs 3 >> $outfile 2>&1"
-
-  wait
-  cp $locpath/*.log $outpath/
-
+  $(LAUNCHER) sh -c "mummi_cganalysis \
+                      --simname $simname \
+                      --path $locpath \
+                      --pathremote $outpath \
+                      --siminputs $outpath \
+                      --fstype mummi \
+                      --fbio mummi \
+                      --simbin gmx \
+                      --backend GROMACS_PARTS \
+                      --simcores 6 \
+                      --nprocs 1 \
+                      --stopsimtime 1000 \
+                      --simruntime -1 \
+                      --logstdout \
+                      --loglevel 2 \
+                      --fcount $cframe >> $outfile 2>&1"

@@ -1,6 +1,14 @@
-# Copyright (c) 2021, Lawrence Livermore National Security, LLC. All rights reserved. LLNL-CODE-827655.
-# This work was produced at the Lawrence Livermore National Laboratory (LLNL) under contract no. DE-AC52-07NA27344 (Contract 44) between the U.S. Department of Energy (DOE) and Lawrence Livermore National Security, LLC (LLNS) for the operation of LLNL.  See license for disclaimers, notice of U.S. Government Rights and license terms and conditions.
-# ------------------------------------------------------------------------------
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# -----------------------------------------------------------------------------
+# Copyright (c) 2021, Lawrence Livermore National Security, LLC. All rights
+# reserved. LLNL-CODE-827655. This work was produced at the Lawrence Livermore
+# National Laboratory (LLNL) under contract no. DE-AC52-07NA27344 (Contract 44)
+# between the U.S. Department of Energy (DOE) and Lawrence Livermore National
+# Security, LLC (LLNS) for the operation of LLNL.  See license for disclaimers,
+# notice of U.S. Government Rights and license terms and conditions.
+# -----------------------------------------------------------------------------
+
 import os
 import time
 import shutil
@@ -15,7 +23,7 @@ from mummi_ras.interfaces import get_io
 try:
     import dynim
 except ImportError:
-    from . import dynim
+    from ... import dynim
 
 from .model_pretrained import PretrainedModel as PatchEncoder
 
@@ -548,5 +556,4 @@ class PatchSelector(object):
         LOGGER.info(f'select_criteria = {selected}')
         return selected
 
-# ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------

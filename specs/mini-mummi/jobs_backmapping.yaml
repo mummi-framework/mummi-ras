@@ -1,0 +1,64 @@
+job_type: backmapping
+
+config:
+  #jobbin:         backmapping
+  jobname:        backmapping
+  jobdesc:        Backmapping ({})
+
+  nnodes:         1
+  nprocs:         1
+  cores per task: 24
+  walltime:       '04:00:00'
+
+imports: # possibly needed for any evals
+  - mummi_ras
+
+dir_sim: aa
+
+variables:
+  simname: null # value supplied by jobTracker
+  timestamp: null # value supplied by jobTracker
+  patch:
+    eval: mummi_ras.Naming.cgframe_parse('{simname}')[-2]
+  frame:
+    eval: mummi_ras.Naming.cgframe_parse('{simname}')[-1]
+  inpath:
+    eval: mummi_ras.Naming.dir_sim('cg', '{patch}')
+  outpath:
+    eval: mummi_ras.Naming.dir_sim('aa', '{simname}')
+  locpath:
+    eval: mummi_ras.Naming.dir_local('backmapping/{simname}')
+  outfile: 'backmapping.out'
+
+script: |
+
+  spack load gromacs@2019.6.mummifix+double target=$(spack arch --target)
+  spack load gromacs@2019.6.mummifix~double target=$(spack arch --target)
+
+  patch={patch}
+  frame={frame}
+  simname={simname}
+  inpath={inpath}
+  outpath={outpath}
+  locpath={locpath}
+  outfile={outfile}
+
+  echo ">> simname = $simname"
+  echo ">> inpath  = $inpath"
+  echo ">> outpath = $outpath"
+  echo ">> locpath = $locpath"
+  echo ">> gmx     =" `which gmx`
+  echo ">> gmx_d   =" `which gmx_d`
+
+  mkdir -p $locpath; cd $locpath
+
+  mummi_backmapping \
+    --fstype   mummi \
+    --patch_id $patch \
+    --frame_id $frame \
+    --inpath   $inpath \
+    --outpath  $outpath \
+    --outlocal $locpath \
+    --logpath  $locpath \
+    --loglevel 1 \
+    >> $outfile 2>&1

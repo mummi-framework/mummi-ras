@@ -1,5 +1,5 @@
-## MuMMI RAS v1.0
-#### Released: Jun 24, 2022
+## MuMMI RAS v2.0
+#### Released: Feb 24, 2026
 
 This guide describes the installation of MuMMI RAS.
 

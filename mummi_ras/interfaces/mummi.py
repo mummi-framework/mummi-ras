@@ -1,6 +1,13 @@
-# Copyright (c) 2021, Lawrence Livermore National Security, LLC. All rights reserved. LLNL-CODE-827655.
-# This work was produced at the Lawrence Livermore National Laboratory (LLNL) under contract no. DE-AC52-07NA27344 (Contract 44) between the U.S. Department of Energy (DOE) and Lawrence Livermore National Security, LLC (LLNS) for the operation of LLNL.  See license for disclaimers, notice of U.S. Government Rights and license terms and conditions.
-# ------------------------------------------------------------------------------
+#!/usr/bin/env python3
+# -----------------------------------------------------------------------------
+# Copyright (c) 2025, Lawrence Livermore National Security, LLC. All rights
+# reserved. LLNL-CODE-827655. This work was produced at the Lawrence Livermore
+# National Laboratory (LLNL) under contract no. DE-AC52-07NA27344 (Contract 44)
+# between the U.S. Department of Energy (DOE) and Lawrence Livermore National
+# Security, LLC (LLNS) for the operation of LLNL.  See license for disclaimers,
+# notice of U.S. Government Rights and license terms and conditions.
+# -----------------------------------------------------------------------------
+
 import os
 import io
 import yaml
@@ -35,7 +42,7 @@ class IO_Mummi (IO_Base):
     io = {
         'simple': mummi_core.get_io('simple'),
         'taridx': mummi_core.get_io('taridx'),
-        'redis': mummi_core.get_io('redis'),
+        # 'redis': mummi_core.get_io('redis'), # We currently deactivate Redis
     }
 
     MACRO_FB_MAX_KEYS_TO_READ = 100000
@@ -522,8 +529,6 @@ class IO_Mummi (IO_Base):
                     cls.io['taridx'].save_files(archive_namespace, keys[k:k + cls.MACRO_FB_PARALLEL_CHUNK_SIZE], rdfs[k:k + cls.MACRO_FB_PARALLEL_CHUNK_SIZE])
             else:
                 # JM 7/16/21: Don't use parallel pool because pytaridx will crash.
-                # mummi_core.interfaces.tar:_save_files:130 - ERROR - Failed to save files: Master block of file /g/g20/moon15/pilot2/mummi_root/feedback-cg2macro/processed_rdfs.20210716-103124.tar.pytree_ invalid!
-                # mummi_core.interfaces.tar:_save_files:130 - ERROR - Failed to save files: [Errno 2] No such file or directory: '/g/g20/moon15/pilot2/mummi_root/feedback-cg2macro/processed_rdfs.20210716-103124.tar.pylst_' -> '/g/g20/moon15/pilot2/mummi_root/feedback-cg2macro/processed_rdfs.20210716-103124.tar.pylst'
                 pool_args_save = [[archive_namespace, keys[k:k + cls.MACRO_FB_PARALLEL_CHUNK_SIZE], rdfs[k:k + cls.MACRO_FB_PARALLEL_CHUNK_SIZE]]
                                   for k in range(0, len(keys), cls.MACRO_FB_PARALLEL_CHUNK_SIZE)
                                   ]

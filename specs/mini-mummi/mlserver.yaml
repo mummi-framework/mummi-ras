@@ -1,0 +1,71 @@
+# This file describes the options that can be used for the MuMMI ML server
+
+config:
+  jobname:       "mlserver"
+  log_mem_usage: 0       # 0 deactivate the memory logging (logging memory is slow)
+  loglevel:      1       # When stable, change to 2 (debug is 1)
+  logpath:       ''      # empty logpath will use ROOT/workspace
+  logfile:       0       # whether to write log to file (0 false, 1 true)
+  logstdout:     1       # whether to write log to stdout
+
+  mini_mummi:    true    # Run with mini MuMMI settings
+
+  lockfile:
+    path: mummi_ras.Naming.dir_root('workspace')
+    name: "mummidb.lock"
+
+workspace:
+  path: mummi_ras.Naming.dir_root('mlserver')
+  # The file where the credentials are stored
+  credentials: "rabbitmq-credentials.json"
+  # The file where the TLS certificate is stored
+  certificate: "rabbitmq-credentials.cacert"
+
+# Broker (for example RabbitMQ) parameters
+broker:
+  interface:   "rabbitmq"
+  queue:       "mummi_queue"
+
+# Auto-encoder (ML model) parameters
+encoder:
+  # Change the path to point to the PATH where your ML resides
+  path:
+  - "/lustre/orion/lrn005/proj-shared/training-data/mummi_large_resources/mini_mummi/" #ORNL
+  - "/p/vast1/mummiusr/mummi_large_resources/mini_mummi/" # LC
+  model: "model-protein_latent_space-mini_mummi_ls-c2289_z32-t2024-10-01-23-33-17_h443704"
+
+sampler:
+  interpolator: "ot_feedback" # Type of sampler used. Can be "naive", "ot" or "ot_feedback"
+  # Pickle file of pre-computed interpolator (will override most settings here if chosen)
+  # If pre_computed is empty or path is not valid, the interpolator will be computed on the fly (costly)
+  pre_computed: ""
+  outpath: mummi_ras.Naming.dir_root('ml')
+  feedback:
+    do_feedback: true
+    database: "db-feedback-sampling.npz" # The feedback database used for sampling (createsims status and validation)
+    frame_database: "db-feedback-frames.npz" # The feedback database used for sampling  (feedback frames from cganalysis)
+  # This factor defines the number of extra structures we will generate
+  # Example: if =2, we will select <= 2 * nMaxSelectedPatchBuffer structures
+  # It is useful when many createsims are failing and we need to generate more
+  factor_extra_structures: 2
+  # Number of neighbors (used to calculate the k nearest neighbors)
+  kneighbors: 10
+  # Define lower bound for paramter lambda that will define how far from training data we are sampling
+  lambda_lowerbound: 0
+  # Define upper bound for parameter lambda
+  lambda_upperbound: 1
+  # Define the number of iterations used by the optimal transport package
+  num_iter_max: 1000000
+  # This parameter defines the fraction of A and B that will actually be used (0.1 = 10%)
+  sub_sample_frac: 1.0
+
+generator:
+  outpath: mummi_ras.Naming.dir_root('ml')
+
+validator:
+  healing: true # perform healing on the validated structures
+  cleanup: true # Remove all the temporary files generated during validations
+  outpath: mummi_ras.Naming.dir_root('ml')
+  # Name of the folder in the mummi_resources to pull out
+  resources: "martini3-validator"
+  complex: "ras-rbdcrd-ref-CG.gro"

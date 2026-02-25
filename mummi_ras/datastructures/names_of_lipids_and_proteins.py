@@ -33,12 +33,33 @@ MACRO_RAS4a_NAMES =  np.array(['RAS4Aa', 'RAS4Ab', 'RAS4Ac'])
 MACRO_RAF4a_NAMES =  np.array(['mRAF4Aa','mRAF4Ab','zRAF4Aa'])
 MACRO_RAS4aF_NAMES = np.array(['mRAS4Aa','mRAS4Ab','zRAS4Aa'])
 
+MACRO_RASRAF2D_NAMES = np.array(['ras2D', 'rasraf2D', 'rasrafma', 'rasrafmb', 'rasrafza'])
+
+MACRO_ADMIRRAL_NAMES = np.array(['state_a',
+                                 'state_b',
+                                 'state_c',
+                                 'state_d',
+                                 'state_e',
+                                 'state_f',
+                                 'state_g',
+                                 'state_i',
+                                 'state_k',
+                                 'state_a_Bstar',
+                                 'state_b_Bstar',
+                                 'state_c_Bstar',
+                                 'state_d_Bstar',
+                                 'state_e_Bstar',
+                                 'state_f_Bstar',
+                                 'state_g_Bstar',
+                                 'state_i_Bstar',
+                                 'state_k_Bstar'])
+
 MACRO_RAS_NAMES  = np.concatenate((MACRO_RAS4a_NAMES,  MACRO_RAS4b_NAMES))
 MACRO_RASF_NAMES = np.concatenate((MACRO_RAS4aF_NAMES, MACRO_RAS4bF_NAMES))
-MACRO_RAF_NAMES  = np.concatenate((MACRO_RAF4a_NAMES,  MACRO_RAF4b_NAMES))
+MACRO_RAF_NAMES  = np.concatenate((MACRO_RAF4a_NAMES,  MACRO_RAF4b_NAMES, MACRO_RASRAF2D_NAMES))
 
-MACRO_RAS_ALL_NAMES = np.concatenate((MACRO_RAS_NAMES, MACRO_RASF_NAMES))
-MACRO_PROTEIN_NAMES = np.concatenate((MACRO_RAS_NAMES, MACRO_RAF_NAMES, MACRO_RASF_NAMES))
+MACRO_RAS_ALL_NAMES = np.concatenate((MACRO_RAS_NAMES, MACRO_RASF_NAMES, MACRO_RASRAF2D_NAMES))
+MACRO_PROTEIN_NAMES = np.concatenate((MACRO_RAS_NAMES, MACRO_RAF_NAMES, MACRO_RASF_NAMES, MACRO_ADMIRRAL_NAMES))
 
 # ------------------------------------------------------------------------------
 # COMPLEX NAMES

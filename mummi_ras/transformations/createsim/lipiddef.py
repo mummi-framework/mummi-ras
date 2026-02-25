@@ -16,13 +16,11 @@ LOGGER = logging.getLogger(__name__)
 # allow grabbing the lipid defs without mummi environment
 try:
     from mummi_core.utils import Naming
-    RES_PATH = Naming.dir_res('martini')
-
+    Naming.init()  
+    RES_PATH = Naming.dir_res('martini3')
 except ModuleNotFoundError as e:
-
     RES_PATH = os.path.join(os.environ['MUMMI_RESOURCES'], 'martini')
     LOGGER.error(f'Failed to import MuMMI. Will read lipid defs from ({RES_PATH})')
-
 
 # Define all lipids
 lipidTypeList = []
@@ -42,8 +40,9 @@ lipidTypeList = []
 #  9 Representative headgroup bead - use for lipid tilt and to define leaflets
 
 # WARNING lipid definitions have changed over time so a few lipids have different versions - that can be selected here
-version = 0  # This is default current version included normally
+#version = 0  # This is default current version included normally
 # version = 1 # This is the PM initial version e.g. used in the normal (not new) complex PM simulations
+version = 2 # this is the new vesrion for Martini 3 - currently only has mix8
 
 # GroupID         0     1     2     3     4        5     6     7       8      9      10     11
 lipidGroup = ["CHOL", "PC", "PE", "SM", "PS", "Glyco", "PI", "PA", "PIPs", "CER", "Lyso", "DAG"]
@@ -51,6 +50,9 @@ lipidGroup = ["CHOL", "PC", "PE", "SM", "PS", "Glyco", "PI", "PA", "PIPs", "CER"
 if version == 1:
     LIPID_DEFS = \
         os.path.join(RES_PATH, "lipiddefs/lipiddefs_v1.0.2.csv")
+elif version == 2:
+     LIPID_DEFS = \
+        os.path.join(RES_PATH, "lipiddefs/lipiddefs_v2.0.0.csv")
 else:
     LIPID_DEFS = \
         os.path.join(RES_PATH, "lipiddefs/lipiddefs_v0.0.2.csv")

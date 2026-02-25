@@ -1,0 +1,133 @@
+# This file describes the options that can be used for the MuMMI ML server
+
+config:
+  jobname:       "mlserver"
+  log_mem_usage: 0
+  loglevel:      2       # When stable, change to 2 (debug is 1)
+  logpath:       ''      # empty logpath will use ROOT/workspace
+  logfile:       0       # whether to write log to file
+  logstdout:     1       # whether to write log to stdout
+
+  mini_mummi:    false    # Run with mini MuMMI settings
+
+  lockfile:  # Lockfile ensuring that multiple jobs can update the same DBs/File
+    path: mummi_ras.Naming.dir_root('workspace')
+    name: "mummidb.lock"
+
+workspace:
+  path: mummi_ras.Naming.dir_root('mlserver')
+  # The file where the credentials are stored
+  credentials: "rabbitmq-credentials.json"
+  # The file where the TLS certificate is stored
+  certificate: "rabbitmq-credentials.cacert"
+
+# Broker (for example RabbitMQ) parameters
+broker:
+  interface:   "rabbitmq"
+  queue:       "mummi_queue"
+
+# Auto-encoder (ML model) parameters
+encoder:
+  # # PC3
+  # path: "/p/vast1/mummiusr/mummi_large_resources/"
+  # # C1
+  # path: "/p/vast1/mummiusr/mummi_large_resources/main_campaign1"
+  # # C2 LC
+  # path: "/p/vast1/mummiusr/mummi_large_resources/main_campaign2"
+  # C2 ORNL
+  # path: "/lustre/orion/lrn005/proj-shared/training-data/mummi_large_resources/main_campaign2"
+  path: 
+  - "/p/vast1/mummiusr/mummi_large_resources/main_campaign2/" # GPFS
+  - "/lustre/orion/lrn005/proj-shared/training-data/mummi_large_resources/main_campaign2" # ORNL
+  # # PC3 pre-round 0
+  # model: "model-protein_latent_space-initial_reconstruction_new5-c17581_z32-t2023-03-07-10-51-45_h549204"
+  # # PC3 round 0
+  # model: "model-protein_latent_space-initial_reconstruction_new5-c17581_z32-t2023-04-08-08-20-33_h907109"
+  # # PC3 round 1
+  # model: "model-protein_latent_space-initial_reconstruction_new5-c17581_z32-t2023-05-15-06-16-50_h565888"
+  # # Campaign 1 (C1): round 0
+  # model: "model-protein_latent_space-initial_reconstruction_new5-c8691_z32-t2023-11-17-17-15-11_h537713"
+  # # Campaign 1 (C1): round 1
+  # model: "model-protein_latent_space-initial_reconstruction_new5-c8691_z32-t2023-11-30-21-19-21_h826598"
+  # # Campaign 1 (C1): round 2
+  # model: "model-protein_latent_space-initial_reconstruction_new5-c8691_z32-t2023-12-06-21-33-23_h561680"
+  
+  # Campaign 2 (C2): Dense (KS)
+  # model: "model-protein_latent_space-initial_reconstruction_new5-c8691_z32-t2024-04-24-11-36-27_h319047"
+  # model: "model-protein_latent_space-initial_reconstruction_new5-c8691_z32-t2024-05-09-00-15-35_h953835"
+  # model: "model-protein_latent_space-initial_reconstruction_new5-c8691_z32-t2024-05-23-14-54-36_h818757" # round 1
+  # model: "model-protein_latent_space-initial_reconstruction_new5-c8691_z32-t2024-06-21-05-46-42_h741218" #round 2
+  model: "model-protein_latent_space-initial_reconstruction_new5-c8691_z32-t2024-08-18-20-27-45_h011389" # round 3
+  # Campaign 2 (C2): Hierchical (TH)
+  # model: "c1-hierarchical-autoencoder-with-hotfix"
+
+  # # For PC3
+  # cg_positions: "CG_data_summary_pos_dis.npz"
+  # # For C1
+  # cg_positions: "CG_pos_data_summary_pos_dis_C1_v1.npz"
+
+models:
+  generative:
+    database: # Where we store pre-computed structures
+      paths:
+      - /lustre/orion/lrn005/proj-shared/mummi-root-c3/test-c3-newucgfb/round2-pre-generated-c3-1000.npz
+    v2ucg: # MuMMI will pick the first valid path
+      paths:
+      - /p/vast1/mummiusr/mummi_large_resources/main_campaign3/ml/generative/v2ucg/BCR1/epoch=99-step=1000000.ckpt
+      - /lustre/orion/lrn005/proj-shared/training-data/mummi_large_resources/main_campaign3/ml/generative/v2ucg/BCR1/epoch=99-step=1000000.ckpt
+    ucg2cg:
+      paths:
+      - /p/vast1/mummiusr/mummi_large_resources/main_campaign3/ml/generative/ucg2cg/BCR1/epoch=99-step=1000000.ckpt
+      - /lustre/orion/lrn005/proj-shared/training-data/mummi_large_resources/main_campaign3/ml/generative/ucg2cg/BCR1/epoch=99-step=1000000.ckpt
+    resources: mummi_ras.Naming.dir_res('generative-indices') # Correspond to a naming convention in mummi-core so we can fetch the file automatically from mummi_resources
+    outpath: mummi_ras.Naming.dir_root('ml') # Where to output structures
+
+  autoencoder:
+    model: "model-protein_latent_space-initial_reconstruction_new5-c8691_z32-t2024-08-18-20-27-45_h011389" # round 3
+    paths:
+    - "/p/vast1/mummiusr/mummi_large_resources/main_campaign2/" # LC
+    - "/lustre/orion/lrn005/proj-shared/training-data/mummi_large_resources/main_campaign2" # ORNL
+    outpath: mummi_ras.Naming.dir_root('ml') # Where to output structures
+
+  ucg_autoencoder:
+    model: model-protein_latent_space-initial_reconstruction_new5-c3_z20-t2025-06-16-15-00-42_h352533
+    paths:
+    - /p/vast1/mummiusr/mummi_large_resources/main_campaign3/ucg_ls/
+    - /lustre/orion/lrn005/proj-shared/training-data/mummi_large_resources/main_campaign3/ucg_ls/
+    resources: mummi_ras.Naming.dir_res('ucg-autoencoder')
+
+sampler:
+  interpolator: "ot_feedback" # Type of sampler used. Can be "naive", "ot" or "ot_feedback"
+   # Pickle file of pre-computed interpolator (will override most settings here if chosen)
+  outpath: mummi_ras.Naming.dir_root('ml')
+  feedback:
+    do_feedback: true
+    database: "db-feedback-sampling.npz" # The feedback database used for sampling (createsims status and validation)
+    frame_database: "db-feedback-frames.npz" # The feedback database used for sampling  (feedback frames from cganalysis)
+  # This factor defines the number of extra structures we will generate
+  # Example: if =2, we will select <= 2 * nMaxSelectedPatchBuffer structures
+  # It is useful when many createsims are failing and we need to generate more
+  factor_extra_structures: 1
+  # Number of neighbors (used to calculate the k nearest neighbors)
+  kneighbors: 10
+  # Define lower bound for paramter lambda that will define how far from training data we are sampling
+  lambda_lowerbound: 0
+  # Define upper bound for parameter lambda
+  lambda_upperbound: 1
+  # Define the number of iterations used by the optimal transport package
+  num_iter_max: 1000000
+  # This parameter defines the fraction of A and B that will actually be used (0.1 = 10%)
+  sub_sample_frac: 0.04
+
+generator:
+  outpath: mummi_ras.Naming.dir_root('ml')
+
+validator:
+  healing: true # perform healing on the validated structures
+  cleanup: true # Remove all the temporary files generated during validations
+  nthreads: 50   # Number of threads to use for the validations
+  outpath: mummi_ras.Naming.dir_root('ml')
+  # Name of the folder in the mummi_resources to pull out
+  resources: "martini3-validator"
+  # complex: "ras-raf-14-3-3-ref-CG.gro" # C2
+  complex: "dimer.gro" # c3

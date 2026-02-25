@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+#BSUB -nnodes 1
+#BSUB -W 60
+#BSUB -q pdebug
+#BSUB -G cancer
+#BSUB -o test_samplers.%J.log
+#BSUB -e test_samplers.%J.err
+#BSUB -J test_samplers
+
+MAX_MEM=$((256*1024)) #Max memory per node on Lassen 256GB
+MEM=$((250*1024))
+
+source ~/.mummi/config.mummi.sh
+source /etc/profile.d/z00_lmod.sh
+
+source $MUMMI_APP/setup/setup.env.sh
+spack load gromacs@2022.06~cuda
+# spack load gromacs@2022.06.gpu arch=$(spack arch)
+
+jsrun -n1 -a1 -c ALL_CPUS -g ALL_GPUS --memory_per_rs ${MEM} python3 $MUMMI_APP/tests/test-sampler-validation.py

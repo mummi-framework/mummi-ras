@@ -1,0 +1,7 @@
+# settings for maestro
+maestro:
+  env:
+  config:
+  batch:
+    type:    flux-async
+    host:    frontier

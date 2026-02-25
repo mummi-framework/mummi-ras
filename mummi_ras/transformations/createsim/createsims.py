@@ -1,10 +1,17 @@
-###############################################################################
-# @todo add Pilot2-splash-app disclaimer
+#!/usr/bin/env python3
+# -----------------------------------------------------------------------------
+# Copyright (c) 2024, Lawrence Livermore National Security, LLC. All rights
+# reserved. LLNL-CODE-827655. This work was produced at the Lawrence Livermore
+# National Laboratory (LLNL) under contract no. DE-AC52-07NA27344 (Contract 44)
+# between the U.S. Department of Energy (DOE) and Lawrence Livermore National
+# Security, LLC (LLNS) for the operation of LLNL.  See license for disclaimers,
+# notice of U.S. Government Rights and license terms and conditions.
+#
 # @authors  Helgi I. Ingolfsson <ingolfsson1@llnl.gov>
 #           Changhoan Kim <kimchang@us.ibm.com>
 #           Francesco Di Natale <dinatale3@llnl.gov>
-#           @todo add other contributers
-###############################################################################
+#           Loic Pottier <pottier1@llnl.gov>
+# -----------------------------------------------------------------------------
 
 """Functions to setup, run and map between macro and CG resolutions."""
 
@@ -25,6 +32,8 @@ import signal
 import time
 import traceback
 from logging import getLogger
+import MDAnalysis as mda
+from MDAnalysis.analysis import distances
 
 import mummi_core
 import mummi_ras
@@ -35,6 +44,7 @@ import mummi_ras.transformations.createsim.placeproteins as placeproteins
 import mummi_ras.transformations.createsim.pdcglob as pdcglob
 from mummi_ras.transformations.patch_creator import fetch_gc_patches
 from mummi_ras.datastructures.patch import Patch as pfPatch
+from mummi_ras.online.cg import get_tiltrot_z_state_multiple
 from mummi_core.utils.logger import init_logger
 
 # Program Globals
@@ -42,17 +52,59 @@ LOGGER = getLogger(__name__)
 global gromacs, mdrun_mpi, mdrun_o
 
 
-def setup_cg_sim(pSim, simpath):
+# Two functions from Tim C. to check structure and pick what FF to use 
+# Note cutoff values should be in Angstroms 
+# @TODO this analysis will also go into cgAnalysis and this test will also be used in createsims consolidate code
+def zn_cutoff(u, cutoff, name):
+    ZN740 = u.select_atoms('name ZN and index 1805')#and resid 740
+    CYS280 = u.select_atoms('name SC1 and index 750')#and resid 280
+    ZN_distances = mda.analysis.distances.distance_array(ZN740, CYS280)
+    if ZN_distances < cutoff:
+        LOGGER.info("Protein structure {} has ZN740 with {} of CYS280 less than cutoff {} use -DACYM280 parameters".format(name, ZN_distances, cutoff))
+        return True
+    else:
+        LOGGER.info("Protein structure {} has ZN740 with {} of CYS280 more than cutoff {} dont use -DACYM280 parameters".format(name, ZN_distances, cutoff))
+        return False
+
+def SEP365_cutoff(u, cutoff, name):
+    SEP365 = u.select_atoms('resname SEP and index 942 and name SC1')
+    SEP365_ARG56 = u.select_atoms('resname ARG and index 1943 and name SC2')# and resid 56
+    SEP365_ARG127 = u.select_atoms('resname ARG and index 2116 and name SC2')#and resid 127
+    SEP_distances1 = mda.analysis.distances.distance_array(SEP365, SEP365_ARG56)
+    SEP_distances2 = mda.analysis.distances.distance_array(SEP365, SEP365_ARG127)
+    #print(SEP_distances1, SEP_distances2)
+    if SEP_distances1 > cutoff or SEP_distances2 > cutoff:
+        LOGGER.info("Protein structure {} has SEP365 {} and {} from ARG56 and 127, more than cutoff {} use -DASEP365 parameters".format(name, SEP_distances1, SEP_distances2, cutoff))
+        return True
+    else:
+        LOGGER.info("Protein structure {} has SEP365 {} and {} from ARG56 and 127, within cutoff {} dont use -DASEP365 parameters".format(name, SEP_distances1, SEP_distances2, cutoff))
+        return False
+
+
+def setup_cg_sim(pSim, simpath, mini_mummi = False):
     """Set up and run eq for the CG sim."""
     LOGGER.info("---> Setup CG sim and run eq in dir {}".format(simpath))
     os.chdir(simpath)
+
+    # Get all .mdp file locally and modify flags if needed 
+    utils.sys_call("cp "+particlesim.dirMartini+"/martini_v2.x_new-rf*.mdp .") # copy all - should be 9 files 
+    added_mdp_options = ""
+    if (len(pSim.proteinUnits) > 0):
+        added_mdp_options = pSim.proteinUnits[0]["ff_options"] # only one set of options (currently only tested with one protein)
+    utils.sys_call(f"sed -ie 's/XXX/{added_mdp_options}/g' martini_v2.x_new-rf-*.mdp") # will change all x9
 
     # Get protein structures insertion string and add random rotation / placement as needed
     protein_string = ""
     # @TODO put this back in with alignment but also support no allignment if protein sturcture is specified (use below)
 
     if (len(pSim.proteinUnits) > 0):
-        proteinRotated, proteinPosInserted = placeproteins.protein_align(pSim.proteinUnits)
+
+        if mini_mummi:
+            proteinRotated = [pSim.proteinUnits[0]["structure"]] # for mini-MuMMI don't change inital structure
+        else:
+            proteinRotated = ["struct_createsim.gro"]
+        proteinPosInserted = [pSim.proteinUnits[0]["position"]]
+
         LOGGER.info("---> Proteins are pressent they are: {}".format(pSim.proteinUnits))
         LOGGER.info("---> After protein alignment: rotation {} posInserted {}".format(proteinRotated, proteinPosInserted))
         for i in range(len(pSim.proteinUnits)):
@@ -62,7 +114,6 @@ def setup_cg_sim(pSim, simpath):
             cypGroupY = -1
             if pSim.proteinUnits[i]["type"] == "RAS4A-RAF" or pSim.proteinUnits[i]["type"] == "RAS4A-ONLY":
                 # Have kras4A need to fined location of CYF and CYP to feed to insane
-                import MDAnalysis as mda
                 protein = mda.Universe(proteinRotated[i])
                 farCOM = protein.select_atoms("resname CYF and name SC1").center_of_mass() / 10 # Rember to convert from A to nm
                 palCOM = protein.select_atoms("resname CYP and name SC1").center_of_mass() / 10 # Rember to convert from A to nm
@@ -71,6 +122,14 @@ def setup_cg_sim(pSim, simpath):
                 cyfGroupY = farCOM[1]
                 cypGroupX = palCOM[0]
                 cypGroupY = palCOM[1]
+            if pSim.proteinUnits[i]["type"] == "dimercomp":
+                # Note a modified insane is used that knows the x2 locations are both FAR for the same complex - insane-patch-build-m3-c3.py
+                # For Adm-C3 m1 FAR 
+                cyfGroupX = proteinPosInserted[i][0]
+                cyfGroupY = proteinPosInserted[i][1]
+                # For Adm-C3 m2 FAR 
+                cypGroupX = pSim.proteinUnits[0]["position_m2"][0]
+                cypGroupY = pSim.proteinUnits[0]["position_m2"][1]
             else:
                 # Have kras4B need to fined location of CYF only leave cyp as -1
                 cyfGroupX = proteinPosInserted[i][0]
@@ -80,25 +139,12 @@ def setup_cg_sim(pSim, simpath):
 
                 # Test only - remove after checking as MDAnalysis takes time to load
                 if False:
-                    import MDAnalysis as mda
                     protein = mda.Universe(proteinRotated[i])
                     farCOM = protein.select_atoms("resname CYF and name SC1").center_of_mass() / 10 # Rember to convert from A to nm
                     LOGGER.info("---> RAS4B CYF = {},{} - COM = {},{}".format(farCOM[0], farCOM[1], proteinPosInserted[i][0], proteinPosInserted[i][1]))
 
-
-            # utils.sys_call("cp "+pSim.rasList[i]+" KRAS-"+str(i)+".gro")
-            # utils.sys_call(gromacs+" editconf -f KRAS-"+str(i)+".gro -o KRAS-"+str(i)+"-rotate.gro -rotate 0 0 "+str(randint(1, 360)))
-            # kras_string += " -ras KRAS-"+str(i)+"-rotate.gro l " + str(pSim.rasPos[i][0]) + " " + str(pSim.rasPos[i][1]) + " "
-            # kras_string += " -ras " + pSim.rasList[i] + " l " + str(pSim.rasPos[i][0]) + " " + str(pSim.rasPos[i][1]) + " "
-            # kras_string += " -ras " + krasRotated[i] + " l " + str(krasPosInserted[i][0]) + " " + str(krasPosInserted[i][1]) + " "
-
-            # @TODO fix this so it will work generalily for C4 - either both insane's or merge support into x1 insane
-            #protein_string += " -ras " + proteinRotated[i] + " l " + str(proteinPosInserted[i][0]) + " " + str(proteinPosInserted[i][1]) + " "
             protein_string += " -ras " + proteinRotated[i] + " l " + str(cyfGroupX) + " " + str(cyfGroupY) + " " + str(cypGroupX) + " " + str(cypGroupY) + " "
-    '''
-    for i in range(len(pSim.proteinUnits)):
-        protein_string += " -ras " + pSim.proteinUnits[i]["structure"] + " l " + str(pSim.proteinUnits[i]["position"][0]) + " " + str(pSim.proteinUnits[i]["position"][1]) + " "
-    '''
+
     LOGGER.info("---> Manual protein alignment insane protein string = {}".format(protein_string))
 
     # If inital setup / em fails tray again untill max tries
@@ -109,10 +155,6 @@ def setup_cg_sim(pSim, simpath):
         # Make inital cordinates (file overwritten by insane so need to generate each time)
         utils.get_file(particlesim.dirMartini+"/"+pSim.defTopFile, 'system.top')
         utils.sys_call("sed -ie 's/xPATHx/"+particlesim.dirMartini.replace("/", "\/")+"/g' system.top")
-        utils.sys_call("sed -ie 's/YYY/"+pSim.rasItp.replace("/", "\/")+"/g' system.top")
-        utils.sys_call("sed -ie 's/ZZZ/"+pSim.rasrafItp.replace("/", "\/")+"/g' system.top")
-        utils.sys_call("sed -ie 's/WWW/"+pSim.ras4aItp.replace("/", "\/")+"/g' system.top")
-        utils.sys_call("sed -ie 's/XXX/"+pSim.ras4arafItp.replace("/", "\/")+"/g' system.top")
 
         # WARNING if we have many CPUs compaired to the simulation size we will get into domain problems - expecially in the begining
         # so change -nt depending on system size e.g. for 15x15 nm system 12 CPUs is good initally
@@ -123,7 +165,6 @@ def setup_cg_sim(pSim, simpath):
         # Get total protein charge - this is now stored for each protein unit
         # Note: use -2 for RAS and -1 for RAS_RAF WARNING RAS-RAF is missing a carge of +4 this not included here so ions need to be addjusted in backmapping
         pCharge = int(np.sum([x['charge'] for x in pSim.proteinUnits]))
-        print(pCharge)
 
         # Setup simulation with modified insane
         # For the real system we want something like this size 31x31 nm or 3200 lipids (1600,1600 - 40x40 per leaflet
@@ -137,7 +178,7 @@ def setup_cg_sim(pSim, simpath):
 
         if pSim.lipidFullAsignment:
             # Assign lipids based on full assignment of each lipid as specified in -lgrid lipid_counts.npz
-            utils.sys_call('python '+particlesim.dirMartini+'/insane-patch-build.py' +
+            utils.sys_call('python '+particlesim.dirMartini+'/insane-patch-build-m3-c3.py' +
                            ' -salt ' + str(pSim.ioncons) +
                            ' -x '+str(pSim.sizeX)+' -y '+str(pSim.sizeY)+' -z ' + str(pSim.sizeZ) +
                            ' -charge '+str(pCharge) +
@@ -148,8 +189,8 @@ def setup_cg_sim(pSim, simpath):
                            ' -lgrid lipid_counts.npz ' +
                            ' '+protein_string+' 2>&1 | tee -a system.top')
         else:
-            # Assign lipids based on probabilities as specified in -uf and -lf files
-            utils.sys_call('python '+particlesim.dirMartini+'/insane-ck.py' +
+            # Assign lipids based on probabilities as specified in -uf and -lf files (always use Martini 3, Martini 2 is legacy)
+            utils.sys_call('python '+particlesim.dirMartini+'/ insane-ck-m3.py' +
                            ' -salt ' + str(pSim.ioncons) +
                            ' -x '+str(pSim.sizeX)+' -y '+str(pSim.sizeY)+' -z ' + str(pSim.sizeZ) +
                            ' -charge '+str(pCharge) +
@@ -170,7 +211,7 @@ def setup_cg_sim(pSim, simpath):
         #   KRAS and a x3 bead FAR
         if (len(pSim.proteinUnits) > 0):
             # Prep pulling protein .top file
-            utils.sys_call("cp system.top system-pull.top")
+            #utils.sys_call("cp system.top system-pull.top") # not needed in M3 PULL is controled in .mdp options 
 
             # Update insane generated .top file to ref correct proteins
             #utils.sys_call("sed -ie 's/Protein          1/KRAS_pull        1/g' system-pull.top")
@@ -182,32 +223,37 @@ def setup_cg_sim(pSim, simpath):
                     utils.sys_call("sed -ie '0,/Protein          1/s//RAS_PULL         1/g' system-pull.top")
                     utils.sys_call("sed -ie '0,/Protein          1/s//RAS              1/g' system.top")
                 elif pSim.proteinUnits[j]["type"] == "RAS-RAF":
-                    utils.sys_call("sed -ie '0,/Protein          1/s//RASR_PULL        1/g' system-pull.top")
-                    utils.sys_call("sed -ie '0,/Protein          1/s//RAS_RAF          1/g' system.top")
+                    # In Adm mini-MuMMI the pulling has been added as options into the default .itp
+                    if mini_mummi:
+                        utils.sys_call("sed -ie '0,/Protein          1/s//RAS_RAF          1/g' system.top")
+                    else:
+                        utils.sys_call("sed -ie '0,/Protein          1/s//RASR_PULL        1/g' system-pull.top")
                 elif pSim.proteinUnits[j]["type"] == "RAS4A-ONLY":
                     utils.sys_call("sed -ie '0,/Protein          1/s//RAS4A_PULL       1/g' system-pull.top")
                     utils.sys_call("sed -ie '0,/Protein          1/s//RAS4A            1/g' system.top")
                 elif pSim.proteinUnits[j]["type"] == "RAS4A-RAF":
                     utils.sys_call("sed -ie '0,/Protein          1/s//RAS4A_RAF_PULL   1/g' system-pull.top")
                     utils.sys_call("sed -ie '0,/Protein          1/s//RAS4A_RAF        1/g' system.top")
+                elif pSim.proteinUnits[j]["type"] == "RAS_RAF_14_3_3":
+                    utils.sys_call("sed -ie '0,/Protein          1/s//KRBR14           1/g' system.top")
+                elif pSim.proteinUnits[j]["type"] == "dimercomp":
+                    utils.sys_call("sed -ie '0,/Protein          1/s//c3complex        1/g' system.top")
                 else:
                     error = "Protein type {} not supported".format(pSim.proteinUnits[j]["type"])
                     LOGGER.error(error)
                     raise AttributeError(error)
 
            # Run energy minimization (steepest descent, with protein constreins)
-            utils.sys_call(gromacs+' grompp -c lipids-water.gro -r lipids-water.gro -f '+particlesim.dirMartini +
-                           '/martini_v2.x_new-rf-em.mdp -p system-pull.top -o topol.tpr -maxwarn 5')
+            utils.sys_call(gromacs+' grompp -c lipids-water.gro -r lipids-water.gro -f martini_v2.x_new-rf-em.mdp -p system.top -o topol.tpr -maxwarn 5')
             # @TODO fix this hack? ntString can't be used as we don't want to limit the CPU's of the proper md runs below
             #utils.sys_call(gromacs+' mdrun '+ntString+' -v -c lipids-water-em.gro >> mdrun-em.log 2>&1')
             # @TODO need to change this
-            utils.sys_call(gromacs+' mdrun -ntmpi 20 -v -c lipids-water-em.gro >> mdrun-em.log 2>&1')
-            #utils.sys_call(mdrun_mpi+' '+mdrun_o+' '+ntString+' -c lipids-water-em.gro >> mdrun-em.log 2>&1 ')
+            #utils.sys_call(gromacs+' mdrun -ntmpi 20 -v -c lipids-water-em.gro >> mdrun-em.log 2>&1')
+            utils.sys_call(mdrun_mpi+' '+mdrun_o+' '+ntString+' -c lipids-water-em.gro >> mdrun-em.log 2>&1')
             utils.sys_call('echo 0 | ' + gromacs+' trjconv -f lipids-water-em.gro -o lipids-water-em.gro -pbc mol -s topol.tpr')
         else:  # No KRAS bilayer only simulations
             # Run energy minimization (steepest descent, with protein constreins)
-            utils.sys_call(gromacs+' grompp -c lipids-water.gro -r lipids-water.gro -f '+particlesim.dirMartini +
-                           '/martini_v2.x_new-rf-em.mdp -p system.top -o topol.tpr -maxwarn 5')
+            utils.sys_call(gromacs+' grompp -c lipids-water.gro -r lipids-water.gro -f martini_v2.x_new-rf-em.mdp -p system.top -o topol.tpr -maxwarn 5')
             utils.sys_call(gromacs+' mdrun -ntmpi 20 -v -c lipids-water-em.gro >> mdrun-em.log 2>&1')
 
         # If em sucesfull don't tray again
@@ -246,9 +292,12 @@ def setup_cg_sim(pSim, simpath):
         tempOutput.write("name 1 Solvent\n")
         tempOutput.write("!1\n")
         tempOutput.write("name 2 Rest\n")
-        tempOutput.write("r CYF & a SC1\n")
+        #tempOutput.write("r CYF & a SC1\n") # changed names in M3
+        #tempOutput.write("r CYF & a BB\n")        
+        tempOutput.write("a BB\n") # Adm-C2 change - pull protein COM using BB only 
         tempOutput.write("name 3 PULL1\n")
-        tempOutput.write("r CYF & a F1\n")
+        #tempOutput.write("r CYF & a F1\n") # changed names in M3
+        tempOutput.write("r CYF & a C1\n")       
         tempOutput.write("name 4 PULL2\n")
         # if any of the proteins is a RAS4A or RAS4A-RAF we allso need to pull CYP
         if any4A:
@@ -321,10 +370,8 @@ def setup_cg_sim(pSim, simpath):
             tempOutput.close()
 
         # Copy in PULL .mdp file - we have to add pull groups
-        # @TODO later we migth also have to addjust pull length based on KRAS structure ?
-        # pullMDPfile = "martini_v2.x_new-rf-eq3-PW-PULL.mdp"
         pullMDPfile = "martini_v2.x_new-rf-eq3-PULL.mdp"
-        utils.sys_call("cp "+particlesim.dirMartini+"/"+pullMDPfile+" .")
+        #utils.sys_call("cp "+particlesim.dirMartini+"/"+pullMDPfile+" .") # now copy all .mdp files above
 
 
         tempOutput = open(pullMDPfile, 'a')
@@ -339,15 +386,17 @@ def setup_cg_sim(pSim, simpath):
         for i in range(len(pSim.proteinUnits)):
             tempOutput.write("; Groups - KRAS CYF #"+str(i+1)+" \n")
             tempOutput.write("pull_group"+str(i*2+1)+"_name         = PULL"+str(i*2+1)+" \n")
-            tempOutput.write("pull_group"+str(i*2+1)+"_pbcatom      = 0 \n")
+            #tempOutput.write("pull_group"+str(i*2+1)+"_pbcatom      = 0 \n")
+            tempOutput.write("pull_group"+str(i*2+1)+"_pbcatom      = 431 \n") # Adm-C2 change @TODO fix should not be hardcoded value 
             tempOutput.write("pull_group"+str(i*2+2)+"_name         = PULL"+str(i*2+2)+" \n")
-            tempOutput.write("pull_group"+str(i*2+2)+"_pbcatom      = 0 \n")
+            tempOutput.write("pull_group"+str(i*2+2)+"_pbcatom      = 432 \n") # Adm-C2 change @TODO fix should not be hardcoded value
+            #tempOutput.write("pull_group"+str(i*2+2)+"_pbcatom      = 0 \n") 
             tempOutput.write("pull_coord"+str(i+1)+"_type         = flat-bottom \n")
-            tempOutput.write("pull_coord"+str(i+1)+"init          = 0.0 \n")  # was 0.4
+            tempOutput.write("pull_coord"+str(i+1)+"init          = 0.1 \n")  # was 0.4
             tempOutput.write("pull_coord"+str(i+1)+"_geometry     = distance  \n")
             tempOutput.write("pull_coord"+str(i+1)+"_groups       = "+str(i*2+1)+" "+str(i*2+2)+" \n")
             tempOutput.write("pull_coord"+str(i+1)+"_dim          = N N Y  \n")
-            tempOutput.write("pull_coord"+str(i+1)+"_rate         = -0.00045  \n") # [nm/ps]
+            tempOutput.write("pull_coord"+str(i+1)+"_rate         = -0.0003  \n") # [nm/ps] - this is 1.2 nm on current length 400 000 * 0.01 = 4000 ps
             # Make less to pull slower?
             # 2021.07.02 400000 * 0.01 = 4000 ps, -0.00045 * 4000 = 1.8 nm. They should all start with a 2.1 nm diff
             # Could change and over pull using e.g. -0.0005 - might help when there is a CYF and CYP mismatch
@@ -357,6 +406,7 @@ def setup_cg_sim(pSim, simpath):
             # @TODO for production reduce box size have these somewhat closer and pull slower
             tempOutput.write("pull_coord"+str(i+1)+"_k            = 1000 \n")
             tempOutput.write("pull_coord"+str(i+1)+"_start        = yes  \n")
+            tempOutput.write("pull-pbc-ref-prev-step-com          = yes \n") # Adm-C2 change (for the pdbatoms)
             tempOutput.write(" \n")
 
         # Add pulling on CYP for all 4A variants
@@ -382,19 +432,19 @@ def setup_cg_sim(pSim, simpath):
         tempOutput.close()
 
         # Run short equilibration at 1 fs time setp + generate velocites
-        utils.sys_call(gromacs+' grompp -c lipids-water-em.gro -f '+particlesim.dirMartini+'/martini_v2.x_new-rf-eq1.mdp ' +
-                       ' -p system-pull.top -o topol.tpr -maxwarn 5 -n index.ndx -r lipids-water-em.gro')
+        utils.sys_call(gromacs+' grompp -c lipids-water-em.gro -f martini_v2.x_new-rf-eq1.mdp ' +
+                       ' -p system.top -o topol.tpr -maxwarn 5 -n index.ndx -r lipids-water-em.gro')
         utils.sys_call(mdrun_mpi+' '+mdrun_o+' '+ntString+' -c lipids-water-eq1.gro >> mdrun-eq1.log 2>&1 ')
 
         # Run short equilibration at 5 fs time setp
         # WARNING for PW use martini_v2.x_new-rf-eq2-PW.mdp
-        utils.sys_call(gromacs+' grompp -c lipids-water-eq1.gro -f '+particlesim.dirMartini+'/martini_v2.x_new-rf-eq2.mdp ' +
-                       ' -p system-pull.top -o topol.tpr -maxwarn 5 -n index.ndx -r lipids-water-em.gro')
+        utils.sys_call(gromacs+' grompp -c lipids-water-eq1.gro -f martini_v2.x_new-rf-eq2.mdp ' +
+                       ' -p system.top -o topol.tpr -maxwarn 5 -n index.ndx -r lipids-water-em.gro')
         utils.sys_call(mdrun_mpi+' '+mdrun_o+' '+ntString+' -c lipids-water-eq2.gro >> mdrun-eq2.log 2>&1')
 
         # Pull molecules to bilayer here, then change .top to while KRAS molecules - using local PULL .mdp
         utils.sys_call(gromacs+' grompp -c lipids-water-eq2.gro -f '+pullMDPfile +
-                       ' -p system-pull.top -o topol.tpr -maxwarn 5 -n index.ndx -r lipids-water-em.gro')
+                       ' -p system.top -o topol.tpr -maxwarn 5 -n index.ndx -r lipids-water-em.gro')
         utils.sys_call(mdrun_mpi+' '+mdrun_o+' '+ntString+' -c lipids-water-eq3.gro >> mdrun-eq3.log 2>&1')
 
     else:  # No protein, bilayer only simulations
@@ -410,20 +460,17 @@ def setup_cg_sim(pSim, simpath):
         utils.sys_call(gromacs+' make_ndx -f lipids-water-em.gro -o index.ndx < index-selection.txt')
 
         # Run short equilibration at 1 fs time setp + generate velocites
-        utils.sys_call(gromacs+' grompp -c lipids-water-em.gro -f '+particlesim.dirMartini +
-                       '/martini_v2.x_new-rf-eq1.mdp -p system.top -o topol.tpr -maxwarn 5 -n index.ndx -r lipids-water-em.gro')
+        utils.sys_call(gromacs+' grompp -c lipids-water-em.gro -f martini_v2.x_new-rf-eq1.mdp -p system.top -o topol.tpr -maxwarn 5 -n index.ndx -r lipids-water-em.gro')
         utils.sys_call(mdrun_mpi+' '+mdrun_o+' '+ntString+' -c lipids-water-eq1.gro >> mdrun-eq1.log 2>&1')
 
         # Run short equilibration at 5 fs time setp
         # WARNING for PW use martini_v2.x_new-rf-eq2-PW.mdp
-        utils.sys_call(gromacs+' grompp -c lipids-water-eq1.gro -f '+particlesim.dirMartini +
-                       '/martini_v2.x_new-rf-eq2.mdp -p system.top -o topol.tpr -maxwarn 5 -n index.ndx -r lipids-water-em.gro')
+        utils.sys_call(gromacs+' grompp -c lipids-water-eq1.gro -f martini_v2.x_new-rf-eq2.mdp -p system.top -o topol.tpr -maxwarn 5 -n index.ndx -r lipids-water-em.gro')
         utils.sys_call(mdrun_mpi+' '+mdrun_o+' '+ntString+' -c lipids-water-eq2.gro >> mdrun-eq2.log 2>&1')
 
         # Run short equilibration at 10 fs time setp
         # WARNING for PW use martini_v2.x_new-rf-eq3-PW.mdp
-        utils.sys_call(gromacs+' grompp -c lipids-water-eq2.gro -f '+particlesim.dirMartini +
-                       '/martini_v2.x_new-rf-eq3.mdp -p system.top -o topol.tpr -maxwarn 5 -n index.ndx -r lipids-water-em.gro')
+        utils.sys_call(gromacs+' grompp -c lipids-water-eq2.gro -f martini_v2.x_new-rf-eq3.mdp -p system.top -o topol.tpr -maxwarn 5 -n index.ndx -r lipids-water-em.gro')
         utils.sys_call(mdrun_mpi+' '+mdrun_o+' '+ntString+' -c lipids-water-eq3.gro >> mdrun-eq3.log 2>&1')
 
     ## @TODO remove this in Campain 3 - this is for campain 1*, to fix the HVR allow it to fix the helix - also edit command below
@@ -433,15 +480,11 @@ def setup_cg_sim(pSim, simpath):
     ## To troubleshot topolgy add -pp temp-pp.top
     #utils.sys_call(mdrun_mpi+' '+mdrun_o+' '+ntString+' -c lipids-water-eq4hvr.gro >> mdrun-eq4hvr.log 2>&1')
 
-    # Added a x2 pre eq4 setp eq4p - 1/10 the number of time step using 5fs and 1/5 the number of time steps, using 10fs
-    utils.sys_call(gromacs+' grompp -c lipids-water-eq3.gro -f '+particlesim.dirMartini +
-                   '/martini_v2.x_new-rf-eq4p.mdp -p system.top -o topol.tpr -maxwarn 5 -n index.ndx -r lipids-water-eq3.gro')
-    utils.sys_call(mdrun_mpi+' '+mdrun_o+' '+ntString+' -c lipids-water-eq4p.gro >> mdrun-eq4p.log 2>&1')
-    #utils.sys_call(mdrun_mpi+' -nt 24 -rdd 2.0 -ntomp 4 -c lipids-water-eq4p.gro >> mdrun-eq4p.log 2>&1')
-    utils.sys_call(gromacs+' grompp -c lipids-water-eq4p.gro -f '+particlesim.dirMartini +
-                   '/martini_v2.x_new-rf-eq4pp.mdp -p system.top -o topol.tpr -maxwarn 5 -n index.ndx -r lipids-water-eq4p.gro')
-    utils.sys_call(mdrun_mpi+' '+mdrun_o+' '+ntString+' -c lipids-water-eq4pp.gro >> mdrun-eq4pp.log 2>&1')
-
+    # Added a x2 eq steps (eq4 and eq5) to slowly relax protein on membrane - Note, HVR postres are also removed from here on
+    utils.sys_call(gromacs+' grompp -c lipids-water-eq3.gro -f martini_v2.x_new-rf-eq4.mdp -p system.top -o topol.tpr -maxwarn 5 -n index.ndx -r lipids-water-eq3.gro')
+    utils.sys_call(mdrun_mpi+' '+mdrun_o+' '+ntString+' -c lipids-water-eq4.gro >> mdrun-eq4.log 2>&1')
+    utils.sys_call(gromacs+' grompp -c lipids-water-eq4.gro -f martini_v2.x_new-rf-eq5.mdp -p system.top -o topol.tpr -maxwarn 5 -n index.ndx -r lipids-water-eq4.gro')
+    utils.sys_call(mdrun_mpi+' '+mdrun_o+' '+ntString+' -c lipids-water-eq5.gro >> mdrun-eq5.log 2>&1')
 
     # Run final equilibration at 20 fs time setp (same as pruduction - test stability + allow the box are to equilibrate
     # @TESTING for now do only 2 ns but should move this to 20-100 ns (for the 3000 lipid systesm)
@@ -450,26 +493,26 @@ def setup_cg_sim(pSim, simpath):
     #               '/martini_v2.x_new-rf-eq4.mdp -p system.top -o topol.tpr -maxwarn 5 -n index.ndx -r lipids-water-eq3.gro')
     #utils.sys_call(gromacs+' grompp -c lipids-water-eq4hvr.gro -f '+particlesim.dirMartini +
     #               '/martini_v2.x_new-rf-eq4.mdp -p system.top -o topol.tpr -maxwarn 5 -n index.ndx -r lipids-water-eq4hvr.gro')
-    utils.sys_call(gromacs+' grompp -c lipids-water-eq4pp.gro -f '+particlesim.dirMartini +
-                   '/martini_v2.x_new-rf-eq4.mdp -p system.top -o topol.tpr -maxwarn 5 -n index.ndx -r lipids-water-eq4pp.gro')
-    # To troubleshot topolgy add -pp temp-pp.top
-    utils.sys_call(mdrun_mpi+' '+mdrun_o+' '+ntString+' -c lipids-water-eq4.gro >> mdrun-eq4.log 2>&1')
+    utils.sys_call(gromacs+' grompp -c lipids-water-eq5.gro -f martini_v2.x_new-rf-eq6.mdp -p system.top -o topol.tpr -maxwarn 5 -n index.ndx -r lipids-water-eq5.gro')
+    utils.sys_call(mdrun_mpi+' '+mdrun_o+' '+ntString+' -c lipids-water-eq6.gro >> mdrun-eq6.log 2>&1')
 
     # Cleanup temp files
     utils.sys_call('rm \#* step*.pdb || true')
-    utils.sys_call('rm system.tope system-pull.tope state.cpt state_prev.cpt traj_comp.xtc traj.trr mdout.mdp md.log ener.edr index-old.ndx temp-index-end.txt || true')
+    utils.sys_call('rm system.tope state.cpt state_prev.cpt traj_comp.xtc traj.trr mdout.mdp md.log ener.edr index-old.ndx temp-index-end.txt || true')
 
     # Compress all cretsims files into createsims.tar.gz storage that are not needed for next steps and remove
     utils.sys_call('tar -czvf createsims.tar.gz psimSubPatch_lower.pat psimSubPatch_upper.pat protein-*-rotate.gro protein-ALL.gro ' +
                    'index-selection.txt lipids-water-em.gro lipids-water-eq1.gro lipids-water-eq2.gro lipids-water-eq3.gro ' +
                    'lipids-water.gro martini_v2.x_new-rf-eq3-PULL.mdp mdrun-em.log mdrun-eq1.log mdrun-eq2.log mdrun-eq3.log ' +
-                   'mdrun-eq4.log pullf.xvg pullx.xvg system-pull.top lipid_counts.npz mdrun-eq4p.log lipids-water-eq4p.gro ' +
-                   'mdrun-eq4pp.log lipids-water-eq4pp.gro || true')
+                   'mdrun-eq4.log pullf.xvg pullx.xvg lipid_counts.npz mdrun-eq5.log lipids-water-eq5.gro ' +
+                   'mdrun-eq6.log lipids-water-eq4.gro macro_sim_dir/snapshot.* macro_sim_dir/macro_createsims.out struct_createsim.gro || true')
     utils.sys_call('rm psimSubPatch_lower.pat psimSubPatch_upper.pat protein-*-rotate.gro protein-ALL.gro ' +
                    'index-selection.txt lipids-water-em.gro lipids-water-eq1.gro lipids-water-eq2.gro lipids-water-eq3.gro ' +
-                   'lipids-water.gro martini_v2.x_new-rf-eq3-PULL.mdp mdrun-em.log mdrun-eq1.log mdrun-eq2.log mdrun-eq3.log ' +
-                   'mdrun-eq4.log pullf.xvg pullx.xvg system-pull.top lipid_counts.npz mdrun-eq4p.log lipids-water-eq4p.gro ' +
-                   'mdrun-eq4pp.log lipids-water-eq4pp.gro || true')
+                   'lipids-water.gro martini_v2.x_new-rf-e*.mdp martini_v2.x_new-rf-*.mdpe mdrun-em.log mdrun-eq1.log ' +
+                   'mdrun-eq2.log mdrun-eq3.log traj_comp.step*.xtc ' +
+                   'mdrun-eq4.log pullf.xvg pullx.xvg lipid_counts.npz mdrun-eq5.log lipids-water-eq5.gro ' +
+                   'mdrun-eq6.log lipids-water-eq4.gro struct_createsim.gro || true')
+    utils.sys_call('rm -r macro_sim_dir || true')
 
 
 def run_multible_cg_sim(pSim, simpath, simrange, genvel):
@@ -484,7 +527,7 @@ def prime_cg_sim(pSim, simpath, rName="", genvel=False):
     os.chdir(simpath)
 
     # Copy over last eq frame and topology
-    cgLastFrame = "lipids-water-eq4.gro"
+    cgLastFrame = "lipids-water-eq6.gro"
     cgTopFile = "system.top"
     cgIndexFile = "index.ndx"
     #cg_eq_sim = pSim.name + '/cg-eq/'
@@ -500,81 +543,15 @@ def prime_cg_sim(pSim, simpath, rName="", genvel=False):
 
     # Set run for production (20 fs time step) - set new velocites e.g. if making multible repeates
     if genvel:
-        utils.sys_call(gromacs+' grompp -c '+cgLastFrame+' -r '+cgLastFrame+' -f '+particlesim.dirMartini +
-                       '/martini_v2.x_new-rf-prod-vel.mdp -p '+cgTopFile+' -o topol.tpr -maxwarn 5 -n '+cgIndexFile)
+        # @WARNING -vel.mdp file is missing in resources @TODO add or remove this feature 
+        utils.sys_call(gromacs+' grompp -c '+cgLastFrame+' -r '+cgLastFrame+' -f martini_v2.x_new-rf-prod-vel.mdp -p '+cgTopFile+' -o topol.tpr -maxwarn 5 -n '+cgIndexFile)
     else:
-        utils.sys_call(gromacs+' grompp -c '+cgLastFrame+' -r '+cgLastFrame+' -f '+particlesim.dirMartini +
-                       '/martini_v2.x_new-rf-prod.mdp -p '+cgTopFile+' -o topol.tpr -maxwarn 5 -n '+cgIndexFile)
-
-    # Get SLURM submission file
-    #utils.get_file(particlesim.dirMartini+'/fancy-slurm-syrah.sh', 'fancy-slurm-syrah.sh')
-    #utils.sys_call("sed -ie 's/XXX/"+pSim.descriptiveName+rName+"/g' fancy-slurm-syrah.sh")
-
-    # Get quartz submission file
-    #utils.get_file(particlesim.dirMartini+'/fancy.sh', 'fancy.sh')
-    #utils.sys_call("sed -ie 's/XXX/"+pSim.descriptiveName+rName+"/g' fancy.sh")
-
-    # Make .pdb file for use as input in ddcMD
-    pdbFileName = cgLastFrame[0:-3]+"pdb"
-    utils.sys_call(gromacs+' editconf -f '+cgLastFrame+' -o '+pdbFileName)
-
-    ###############
-    # Get all files needed for ddcMD Martini run
-
-    utils.sys_call("mkdir snapshot.mem")
-    #utils.sys_call("mkdir snapshot.000000000000")
-
-    # Fix .pdb file to include protein seperation section
-    pdbFileFileName = cgLastFrame[0:-4]+"-fix.pdb"
-    utils.sys_call("cp "+pdbFileName+" "+pdbFileFileName)
-    utils.sys_call("sed -ie 's/MG+ ION/MG   MG/g' "+pdbFileFileName)
-    utils.sys_call("sed -ie 's/NA+ ION/NA   NA/g' "+pdbFileFileName)
-    utils.sys_call("sed -ie 's/CL- ION/CL   CL/g' "+pdbFileFileName)
-    utils.sys_call("sed -ie 's/ZN+ ION/ZN   ZN/g' "+pdbFileFileName)
-    #utils.sys_call("sed -ie '/BB  THR     1/i TER' "+pdbFileFileName)
-    #utils.sys_call("sed -ie '/BB  THR     1/i PROTEIN        1     KRAS' "+pdbFileFileName)
-    #utils.sys_call("sed -ie '/MG  MG/a ENDPROTEIN' "+pdbFileFileName)
-
-    # Fix names in .top file if needed
-    utils.sys_call("sed -ie 's/NA+ /NA  /g' "+cgTopFile)
-    utils.sys_call("sed -ie 's/CL- /CL  /g' "+cgTopFile)
-
-    # Copy in needed ddcMD setup files
-    utils.sys_call("cp "+particlesim.dirddcMD+"/object.data .")
-    utils.sys_call("cp "+particlesim.dirddcMD+"/resItpList .")
-    utils.sys_call("cp "+particlesim.dirddcMD+"/POPX_Martini_v2.0_lipid.itp .")
-
-    # Copy in ddcMD Martini toloplogy files - note this can be default form mummi_resources or feedback from specific feedback dir.
-    utils.sys_call("cp "+pSim.ddcMDParams+"/martini.data .")
-    utils.sys_call("cp "+pSim.ddcMDParams+"/molecule.data .")
-    utils.sys_call("cp "+pSim.ddcMDParams+"/ConsAtom.data .")
-
-    # Convert final pdb to ddcMD atom format + make retart file and put in correct places
-    #   This is the new way of doing this move back to that when ddcMD new vesion is working
-    ## @TODO @WARNING this is a hack to get proItpList to work; Xiaohua, needs to change - maybe we change from system call to pyton call?
-    #utils.sys_call("echo  " + particlesim.dirddcMD + "/KRAS-GTP-04-HVR-best-guess-M22-CYFpos.itp > proItpList")
-    #utils.sys_call('pdbmartini2obj -p '+pdbFileFileName+' -t proItpList -f '+particlesim.dirddcMD+'/ConsAtom.data -o snapshot.mem/atoms#000000')
-    ##   This is the old way of calling the ddcMDConvertor - used now for testing
-    #utils.sys_call('pdbmartini2obj -p '+pdbFileFileName+' -o snapshot.mem/atoms#000000')
-    # This is the new way convert 1.0.4
-    utils.sys_call('pdbmartini2obj -p '+pdbFileFileName+' -t '+cgTopFile+' -m martini.data -f ConsAtom.data -o snapshot.mem/atoms#000000')
-
-    utils.sys_call("mv restart snapshot.mem/")
-    utils.sys_call("ln -s snapshot.mem/restart")
-    #utils.sys_call('pdbmartini2obj -p '+pdbFileFileName+' -o snapshot.000000000000/atoms#000000')
-    #utils.sys_call("mv restart snapshot.000000000000/")
-    #utils.sys_call("ln -s snapshot.000000000000/restart")
-
-    # Generate ddcMD restraint file
-    #@TODO resItpList is hardcoded also the file it refearnces - needs to change more to resources - and/or compleatly change
-    #@WARNING works on lassen - will not work on summit
-    #utils.sys_call("restraint -i snapshot.mem/atoms#000000 -o restraint.data -p /usr/gapps/kras/templates/ddcMD/resItpList")
-    #utils.sys_call("restraint -i snapshot.000000000000/atoms#000000 -o restraint.data -p /usr/gapps/kras/templates/ddcMD/resItpList")
-    utils.sys_call("restraint -i snapshot.mem/atoms#000000 -o restraint.data -p resItpList")
+        utils.sys_call(gromacs+' grompp -c '+cgLastFrame+' -r '+cgLastFrame+' -f martini_v2.x_new-rf-prod.mdp -p '+cgTopFile+' -o topol.tpr -maxwarn 5 -n '+cgIndexFile)
 
     # Cleanup temp files
     utils.sys_call('rm \#* || true')
-    utils.sys_call('rm fancy-slurm-syrah.she fancy.she lipids-water-eq4-fix.pdbe mdout.mdp system.tope || true')
+    utils.sys_call('rm fancy-slurm-syrah.she fancy.she lipids-water-eq4-fix.pdbe mdout.mdp system.tope molecule_1.data molecule_2.data molecule_3.data || true')
+    # @TODO do further cleanup before main campaign add: tpr.log  others ??
 
 
 def run_cg_sim_GROMACS(pSim, simpath, inpath, intype):
@@ -588,19 +565,6 @@ def run_cg_sim_GROMACS(pSim, simpath, inpath, intype):
 
     # Dump pdb file from Sim
     utils.sys_call('echo 0 | ' + gromacs+' trjconv -f traj_comp.xtc -o '+pSim.name+'_cg000_f.pdb -sep')
-
-    '''
-    # Load pdb fiels to DataBroker
-    if (intype == "db"):
-        # Save .pdb files to DB
-        db = DataBroker()
-        db.connect(inpath)
-        for pdbFile in os.listdir('.'):
-            if os.path.isfile(pdbFile) and pdbFile[0:7] == "pfpatch":
-                LOGGER.info("PDB_File: " + pdbFile)
-                db.put(pdbFile, particlesim.add_simpath(pdbFile))
-        db.disconnect()
-    '''
 
     # Cleanup temp
     utils.sys_call('rm \#* || true')
@@ -627,11 +591,6 @@ def backmapp_cg_sim(pSim, simpath, frame):
     # @WARNING assumes x3 lines of solvent
     lines = np.sum(pSim.lipidLowerRatioArray != 0) + np.sum(pSim.lipidUpperRatioArray != 0)
     utils.sys_call('tail -n '+str(lines+3)+' '+cgTopFile+' | head -n ' + str(lines) + ' >> '+aaTopFile)
-
-    # initram uses GROMACS and has to have it in path - now source, on the server we might want to change initram
-    # @TODO this dose not work for some reason ??? currently need to source gromacs before running script,
-    #  change to pass gmx path to initram.sh
-    # utils.sys_call('source '+gromacs+'GMXRC')
 
     # Run the actual backmapping and intal growing in of the AA force field
     utils.sys_call(particlesim.dirCHARMM+'/initram.sh -f '+cgLastFrame+' -p '+aaTopFile +
@@ -794,14 +753,21 @@ def generate_probabilistic_patch(concentrations, particle_count):
     return int_counts.astype(int)
 
 
-def creat_cg_patch(specifications, simnum):
+def creat_cg_patch(specifications, simnum, mini_mummi = False):
     """Creates a default mix8 one KRAS patch, then modifies based on specifications."""
 
     # Average Mix8b - no sub-composision
-    lipidTypes = ["POPX", "POPC", "PAPC", "POPE", "DIPE", "DPSM", "PAPS", "PAP6", "CHOL"]
-    lipidUpperRatioArray = [[243,   0, 121, 20, 61, 242, 0, 0, 313]]
-    lipidLowerRatioArray = [[0,   139, 75, 54, 161, 108, 161, 22, 280]]
-
+    # Always use Martini 3 lipid names Martini 2 are still here for backwards compatibility 
+    if True:
+        # M3
+        lipidTypes = ["POPX", "POPC", "PAPC", "POPE", "DLPE", "SSM", "PAPS", "SAP6", "CHOL"]
+        lipidUpperRatioArray = [[243,   0, 121, 20, 61, 242, 0, 0, 350]]
+        lipidLowerRatioArray = [[0,   139, 75, 54, 161, 108, 161, 22, 243]]
+    else:
+        # M2 
+        lipidTypes = ["POPX", "POPC", "PAPC", "POPE", "DIPE", "DPSM", "PAPS", "PAP6", "CHOL"]
+        lipidUpperRatioArray = [[243,   0, 121, 20, 61, 242, 0, 0, 313]]
+        lipidLowerRatioArray = [[0,   139, 75, 54, 161, 108, 161, 22, 280]]
     proteinUnits = []
 
     cProteinDict = {}
@@ -814,7 +780,7 @@ def creat_cg_patch(specifications, simnum):
         cProteinDict["state"] = "N/A"
         cProteinDict["position"] =  [15,15]
         cProteinDict["structure_pre_assigned"] = True
-        cProteinDict["structure"] = "/g/g90/helgi/mummi_resources/martini/test_RAS4A/KRAS4A_RAF_shift.gro"
+        cProteinDict["structure"] = "KRAS4A_RAF_shift.gro"
         cProteinDict["charge"] = -1
     elif "RAS4A" in simnum:
         # RAS4A
@@ -823,18 +789,40 @@ def creat_cg_patch(specifications, simnum):
         cProteinDict["state"] = "N/A"
         cProteinDict["position"] =  [15,15]
         cProteinDict["structure_pre_assigned"] = True
-        cProteinDict["structure"] = "/g/g90/helgi/mummi_resources/martini/test_RAS4A/KRAS4A_shift.gro"
+        cProteinDict["structure"] = "KRAS4A_shift.gro"
         cProteinDict["charge"] = -2
     elif "RAS_RAF" in simnum:
-        # RAS-RAF (with regular KRAS4b)
-        cProteinDict["type"] = "RAS-RAF"
-        cProteinDict["angle"] = 0
+        if mini_mummi:
+            # Update for mini-MuMMI M3
+            # RAS-RAF (with regular KRAS4b)
+            cProteinDict["type"] = "RAS-RAF"
+            cProteinDict["angle"] = "" # not set 
+            cProteinDict["beads"] = -1
+            cProteinDict["state"] = "N/A"
+            cProteinDict["position"] =  [10,10]
+            cProteinDict["structure_pre_assigned"] = True
+            cProteinDict["structure"] = "n/a" # will set later 
+            cProteinDict["charge"] = -1
+        else:
+            # RAS-RAF (with regular KRAS4b)
+            cProteinDict["type"] = "RAS-RAF"
+            cProteinDict["angle"] = 0
+            cProteinDict["beads"] = -1
+            cProteinDict["state"] = "N/A"
+            cProteinDict["position"] =  [15,15]
+            cProteinDict["structure_pre_assigned"] = True
+            cProteinDict["structure"] = "RAS-RAF_state_ma_1.gro"
+            cProteinDict["charge"] = -1
+    elif "dimercomp" in simnum:
+        # Full complex RAS-RAF (m1) 14-3-3^2 RAS-RAF (m2)
+        cProteinDict["type"] = "dimercomp"
+        cProteinDict["angle"] = "" # not set 
         cProteinDict["beads"] = -1
         cProteinDict["state"] = "N/A"
-        cProteinDict["position"] =  [15,15]
+        cProteinDict["position"] =  [18,18]
         cProteinDict["structure_pre_assigned"] = True
-        cProteinDict["structure"] = "/g/g90/helgi/mummi_resources/martini/test_RAS4A/RAS-RAF_state_ma_1.gro"
-        cProteinDict["charge"] = -1
+        cProteinDict["structure"] = "n/a" # will set later 
+        cProteinDict["charge"] = 0
     else:
         # RAS-only (regular KRAS4b)
         cProteinDict["type"] = "RAS-ONLY"
@@ -842,18 +830,17 @@ def creat_cg_patch(specifications, simnum):
         cProteinDict["state"] = "N/A"
         cProteinDict["position"] =  [15,15]
         cProteinDict["structure_pre_assigned"] = True
-        cProteinDict["structure"] = "/g/g90/helgi/mummi_resources/martini/test_RAS4A/RAS-ONLY_state_a_100.gro"
+        cProteinDict["structure"] = "RAS-ONLY_state_a_100.gro"
         cProteinDict["charge"] = -2
 
     proteinUnits.append(cProteinDict)
 
-    patchSim = particlesim.ParticleSim(lipidTypes, lipidUpperRatioArray, lipidLowerRatioArray, lipidSuPatches=[1, 1], proteinUnits=proteinUnits, asym=-118, simName=simnum, lipidFullAsignment=False)
+    # mini-MuMMI 20x20 patch in M3 
+    if mini_mummi:
+        patchSim = particlesim.ParticleSim(lipidTypes, lipidUpperRatioArray, lipidLowerRatioArray, lipidSuPatches=[1, 1], proteinUnits=proteinUnits, asym=-65, simName=simnum, lipidFullAsignment=False, mini_mummi = True)
+    else:
+        patchSim = particlesim.ParticleSim(lipidTypes, lipidUpperRatioArray, lipidLowerRatioArray, lipidSuPatches=[1, 1], proteinUnits=proteinUnits, asym=-118, simName=simnum, lipidFullAsignment=False)
     #patchSim.cgnt = 8 not supportet if you also specified in commond input
-    # @TODO generalize RAS-RAF temp test
-    #krasStruct = particlesim.dirKRASStructures + "/KRAS-04-protein-cg-M22-em-shift.gro"
-    #krasStruct = "/g/g90/helgi/mummi_resources/kras-structures/RAS-RAF-01-fix-shift.gro"
-    #patchSim.rasList = [krasStruct]
-    #patchSim.rasPos = [[15,15]]
 
     # Alter default based on specifications
     for cAttr in specifications.split():
@@ -862,12 +849,15 @@ def creat_cg_patch(specifications, simnum):
 
     return patchSim
 
-def convert_gc_patch_to_cg_patch(p, simnum):
+def convert_gc_patch_to_cg_patch(p, simnum, wkpath):
     """Converts a GC patch to a CG patch."""
 
+    if not p:
+        LOGGER.error(f"The patch {simnum} {wkpath} appears to be empty")
+        raise ValueError(f"The patch {simnum} {wkpath} appears to be empty")
+
     # Print patch info
-    LOGGER.info("Macro patch is:")
-    LOGGER.info(str(p))
+    LOGGER.info(f"Macro patch is: {str(p)}")
     LOGGER.info("Patch id            = {}".format(p.id))
     LOGGER.info("Protein bead ids    = {}".format(p.protein_ids))
     LOGGER.info("Protein bead states = {}".format(p.protein_states))
@@ -899,34 +889,34 @@ def convert_gc_patch_to_cg_patch(p, simnum):
     #   Info Patch.LIPID_NAMES =
     #   ['nInner_POPC', 'nInner_PAPC', 'nInner_POPE', 'nInner_DIPE', 'nInner_DPSM', 'nInner_PAPS', 'nInner_PAP6', 'nInner_CHOL',
     #    'nOuter_POPC', 'nOuter_PAPC', 'nOuter_POPE', 'nOuter_DIPE', 'nOuter_DPSM', 'nOuter_CHOL']
-    lipidTypes = ["POPX", "POPC", "PAPC", "POPE", "DIPE", "DPSM", "PAPS", "PAP6", "CHOL"]
+    lipidTypes = ["POPX", "POPC", "PAPC", "POPE", "DLPE", "SSM", "PAPS", "SAP6", "CHOL"]
 
     lInner = lconcentrations[:, :, 0:8]
     lOuter = lconcentrations[:, :, 8:14]
     sumOuter = np.sum(lOuter) / (lconcentrations.shape[0]*lconcentrations.shape[1])
     sumInner = np.sum(lInner) / (lconcentrations.shape[0]*lconcentrations.shape[1])
-    asym = np.rint(1600 * (1 - (sumInner / sumOuter))).astype(int)
+    asym = np.rint(2809 * (1 - (sumInner / sumOuter))).astype(int)
     # For testing of lipid consentrations
     #np.save("concentrations_asym.npy", asym)
 
     # Save full lipid type asignmet patch for insane to read
-    lipid_types_inner = ["POPC", "PAPC", "POPE", "DIPE", "DPSM", "PAPS", "PAP6", "CHOL"]
-    lipid_types_outer = ["POPX", "PAPC", "POPE", "DIPE", "DPSM", "CHOL"]
+    lipid_types_inner = ["POPC", "PAPC", "POPE", "DLPE", "SSM", "PAPS", "SAP6", "CHOL"]
+    lipid_types_outer = ["POPX", "PAPC", "POPE", "DLPE", "SSM", "CHOL"]
     #p.concentrations.shape # (37, 37, 14)  (for new patches)
     #lconcentrations_full = pdcglob.reinterp(37, 37, 14, p.concentrations, 40, 40)
     # To fit protein placement we need to use the transpose of x,y columns
-    lconcentrations_full = pdcglob.reinterp(72, 72, 14, p.concentrations.transpose((1,0,2)), 40, 40)
+    lconcentrations_full = pdcglob.reinterp(100, 100, 14, p.concentrations.transpose((1,0,2)), 53, 53)
     lInner_full = lconcentrations_full[:, :, 0:8]
     lOuter_full = lconcentrations_full[:, :, 8:14]
     sumOuter_full = np.sum(lOuter_full) / (lconcentrations_full.shape[0]*lconcentrations_full.shape[1])
     sumInner_full = np.sum(lInner_full) / (lconcentrations_full.shape[0]*lconcentrations_full.shape[1])
 
     # @WARNING should not be asym_full always 0
-    asym_full = np.rint(1600 * (1 - (sumInner_full / sumOuter_full))).astype(int)
+    asym_full = np.rint(2809 * (1 - (sumInner_full / sumOuter_full))).astype(int)
     LOGGER.info("Both asym(s) shoudl be the same asym {} and asym_full {} outer {} inner {}".format(asym, asym_full, sumOuter_full, sumInner_full))
-    lipid_counts_inner = pdcglob.pdcglob(40, 40, 8, lInner_full)
-    lipid_counts_outer = pdcglob.pdcglob(40, 40, 6, lOuter_full)
-    lipid_counts_file = "lipid_counts.npz"
+    lipid_counts_inner = pdcglob.pdcglob(53, 53, 8, lInner_full)
+    lipid_counts_outer = pdcglob.pdcglob(53, 53, 6, lOuter_full)
+    lipid_counts_file = os.path.join(wkpath, "lipid_counts.npz")
     np.savez_compressed(lipid_counts_file, lipid_counts_inner = lipid_counts_inner, lipid_counts_outer = lipid_counts_outer, asym = asym_full, lipid_types_inner = lipid_types_inner, lipid_types_outer = lipid_types_outer)
     LOGGER.info("Full patch lipid type assignment saved to {}, asym {}, shape {}".format(lipid_counts_file, asym_full, lconcentrations_full.shape))
 
@@ -936,7 +926,7 @@ def convert_gc_patch_to_cg_patch(p, simnum):
         LOGGER.error(error)
         raise ValueError(error)
 
-    if (asym > 500 or asym < -500):
+    if (asym > 600 or asym < -600):
         error = "---> Bilayer asymmetry is all to high asym = " + str(asym)
         LOGGER.error(error)
         raise ValueError(error)
@@ -951,6 +941,8 @@ def convert_gc_patch_to_cg_patch(p, simnum):
         LOGGER.error(error)
         raise ValueError(error)
 
+    # Adm-C2 if 25 subpatches (25*64=1600, not we have 25*112 = 2800 (should be 2809) 
+    # this is not exact but we dont' use this anymore so not an issue 
     # @TODO change this to based on 64 lipids per subpatch (to explore rounding)
     # @TODO depdning on variations in cons from PF maybe to "proper" pre rounding here ???
     #old_lOuter = np.rint(64 * lOuter / sumOuter).astype(int)
@@ -964,11 +956,11 @@ def convert_gc_patch_to_cg_patch(p, simnum):
     # based on the probability.
     for i in range(0, lInner.shape[0]):
         for j in range(0, lInner.shape[1]):
-            lInner[i, j] = generate_probabilistic_patch(lInner[i, j], 64)
+            lInner[i, j] = generate_probabilistic_patch(lInner[i, j], 112)
     lInner = lInner.astype(int)
     for i in range(0, lOuter.shape[0]):
         for j in range(0, lOuter.shape[1]):
-            lOuter[i, j] = generate_probabilistic_patch(lOuter[i, j], 64)
+            lOuter[i, j] = generate_probabilistic_patch(lOuter[i, j], 112)
     lOuter = lOuter.astype(int)
 
     # @TODO Use this to explor lipid consetnrations - excel magic ( a 0 values will be left out of the list but 1/1000 is ok)
@@ -1003,20 +995,6 @@ def convert_gc_patch_to_cg_patch(p, simnum):
     # Initial shift not needed anymore as first beads is at center pixel (not 0,0 but within 1/2 pixel of that)
     # posArray = p.protein_positions - p.protein_positions[0]  # Center at 0,0
 
-    '''
-    # Shift from box center at 0,0 to box lower/left edge at 0,0 as used in the CG simulations
-    posArray = []
-    if len(p.protein_positions) > 0:
-        box_dim = 31.0 # @WARNING hared coded, also in particesim.py
-        half_box_dim = box_dim / 2.0 # Get box center to move protein 0,0 to box edge
-        posArray = p.protein_positions # First bead in the patche should be RAS and now centerd (close to 0,0)
-        posArray = posArray + [half_box_dim, half_box_dim]
-        if (posArray.max() > 31 or posArray.min() < 0):
-            error = "---> Protein posisions are outside the CG box size; pos are: " + np.array2string(krasPosArray)
-            LOGGER.error(error)
-            raise ValueError(error)
-        LOGGER.info("Protein bead pos ce = {}".format(posArray))
-    '''
     # Now I assume they are all in the right box (0,0 to max,max)
     posArray = p.protein_positions
 
@@ -1042,7 +1020,26 @@ def convert_gc_patch_to_cg_patch(p, simnum):
         cProteinDict["id"] = i
 
         # check if current bead belongs to a complex
-        if (len(p.complex_ids) > 0 and any(remainig_ids[0] in string for string in p.complex_ids)):
+        if p.protein_states[i] == 'rasraf2D':
+            cComplex = []
+            for x in p.complex_ids:
+                if remainig_ids[0] in x:
+                    cComplex = x
+                    break
+            cProteinDict["beads"] = cComplex
+            cProteinDict["state"] = 'rasraf2D'
+            cProteinDict["type"] = "RAS-RAF"
+            cProteinDict["structure"] = "N/A"
+            cProteinDict["charge"] = -1
+
+            # RAS-RAF is places usign RAS farnesyl x,y pos
+            cPosRAS = posArray[0][0:2] # @WARNING there are x3 cords last used for GCMM analysis data not relevant here and not z value
+            cProteinDict["position"] = cPosRAS
+            assert cProteinDict["position"].shape[0] == 2
+
+            LOGGER.info("Protein unit {} adding rasraf2D complex for bead ids {} full info: {}".format(i, cComplex, str(cProteinDict)))
+
+        elif (len(p.complex_ids) > 0 and any(remainig_ids[0] in string for string in p.complex_ids)):
             # Adding a RAS-RAF protein (either 4B or 4A)
             cComplex = []
             for x in p.complex_ids:
@@ -1064,7 +1061,7 @@ def convert_gc_patch_to_cg_patch(p, simnum):
             cPosRAF = posArray[np.where(p.protein_ids == raf_bead_id)][0][0:2] # @WARNING there are x3 cords last used for GCMM analysis data not relevant here and not z value
 
             deltaPost = cPosRAF - cPosRAS
-            deltaPost = correctPBCjump(deltaPost, [30, 30]) # in current GCMM schema beads are allways within PBC here we don't want that but the RAF that is closest to RAS
+            deltaPost = correctPBCjump(deltaPost, [40, 40]) # in current GCMM schema beads are allways within PBC here we don't want that but the RAF that is closest to RAS
             rafAngle = math.degrees(math.atan2(deltaPost[1], deltaPost[0])) % 360
             # atan2 returns in radians -pi to pi and takes in y,x so flip, convert and set to 0-360
             cProteinDict["angle"] = rafAngle
@@ -1078,8 +1075,6 @@ def convert_gc_patch_to_cg_patch(p, simnum):
                 # Now we are adding a RAS4A-RAF (with RAS4A)
                 cProteinDict["type"] = "RAS4A-RAF"
                 cProteinDict["structure"] = "N/A"
-                #cProteinDict["structure"] = "/g/g90/helgi/mummi_resources/martini/test_RAS4A/KRAS4A_RAF_shift_updateitp.gro"
-                #cProteinDict["structure"] = "/g/g90/helgi/mummi_resources/martini/test_RAS4A/KRAS4A_RAF_shift.gro"
                 cProteinDict["charge"] = -1
                 LOGGER.info("Protein unit {} adding RAS4A-RAF (4A RAS) complex for bead ids {} full info: {}".format(i, cComplex, str(cProteinDict)))
             else:
@@ -1104,10 +1099,6 @@ def convert_gc_patch_to_cg_patch(p, simnum):
                 cProteinDict["type"] = "RAS4A-ONLY"
                 cProteinDict["structure"] = "N/A"
                 # Test for inital structure library
-                #cProteinDict["structure"] = "/p/gpfs1/helgi/mummi_root_20210513/sims-cg/RAS4A_states/temp-box-shift-em.gro"
-                #cProteinDict["structure_pre_assigned"] = True
-                #cProteinDict["structure"] = "/g/g90/helgi/mummi_resources/martini/test_RAS4A/KRAS4A_shift.gro"
-                #cProteinDict["structure"] = "/g/g90/helgi/mummi_resources/martini/test_RAS4A/KRAS4A_shift_updateitp.gro"
                 cProteinDict["charge"] = -2
                 LOGGER.info("Protein unit {} adding RAS4A-ONLY (4A RAS) for bead id {} full info: {}".format(i, remainig_ids[0], str(cProteinDict)))
             else:
@@ -1264,7 +1255,7 @@ def convert_pf_patch_to_cg_patch(p, simnum):
     LOGGER.info("Both asym(s) shoudl be the same asym {} and asym_full {}".format(asym, asym_full))
     lipid_counts_inner = pdcglob.pdcglob(40, 40, 8, lInner)
     lipid_counts_outer = pdcglob.pdcglob(40, 40, 6, lOuter)
-    lipid_counts_file = "lipid_counts.npz"
+    lipid_counts_file = os.path.join(wkpath, "lipid_counts.npz")
     np.savez_compressed(lipid_counts_file, lipid_counts_inner = lipid_counts_inner, lipid_counts_outer = lipid_counts_outer, asym = asym_full, lipid_types_inner = lipid_types_inner, lipid_types_outer = lipid_types_outer)
     LOGGER.info("Full patch lipid type assignment saved to {}, asym {}, shape".format(lipid_counts_file, asym_full, lconcentrations_full.shape))
 
@@ -1341,8 +1332,6 @@ def convert_pf_patch_to_cg_patch(p, simnum):
                 assert cProteinDict["position"].shape[0] == 2
 
                 cProteinDict["structure"] = "N/A"
-                #cProteinDict["structure"] = "/g/g90/helgi/mummi_resources/martini/test_RAS4A/KRAS4A_RAF_shift_updateitp.gro"
-                #cProteinDict["structure"] = "/g/g90/helgi/mummi_resources/martini/test_RAS4A/KRAS4A_RAF_shift.gro"
                 # @TODO change to N/A and - after we fix library for 4A - cProteinDict["structure"] = "N/A"
                 cProteinDict["charge"] = -1
                 LOGGER.info("Protein unit {} converting 4B to 4A - adding RAS4A-RAF complex for bead ids {} full info: {}".format(i, cComplex, str(cProteinDict)))
@@ -1404,8 +1393,6 @@ def convert_pf_patch_to_cg_patch(p, simnum):
                 cProteinDict["state"] = p.protein_states[np.where(p.protein_ids == remainig_ids[0])][0][3:]
                 cProteinDict["position"] =  posArray[np.where(p.protein_ids == remainig_ids[0])][0]
                 assert cProteinDict["position"].shape[0] == 2
-                #cProteinDict["structure"] = "/g/g90/helgi/mummi_resources/martini/test_RAS4A/KRAS4A_shift.gro"
-                #cProteinDict["structure"] = "/g/g90/helgi/mummi_resources/martini/test_RAS4A/KRAS4A_shift_updateitp.gro"
                 cProteinDict["structure"] = "N/A"
                 # @TODO change to N/A and - after we fix library for 4A - cProteinDict["structure"] = "N/A"
                 cProteinDict["charge"] = -2
@@ -1434,22 +1421,6 @@ def convert_pf_patch_to_cg_patch(p, simnum):
                 '''
                 cProteinDict["structure"] = "N/A"
 
-                ''' @TODO, this
-                # Temp add for RAS-ONLY seperate build using old patches
-                cProteinDict["beads"] = 1
-                cProteinDict["state"] = "n/a"
-                cProteinDict["position"] =  posArray[0]
-                assert cProteinDict["position"].shape[0] == 2
-                #/p/gpfs1/helgi/init_structures_ras/chris_fixed_10/sr2_pfpatch_000000343624_1000ns.gro
-                cStructureName = "/p/gpfs1/helgi/init_structures_ras/chris_fixed_10/{}".format(simnum)
-                LOGGER.info("Get {} structure: state {}, filename {}".format(cProteinDict["type"], cProteinDict["state"], cStructureName))
-                if not os.path.isfile(cStructureName):
-                    error = "---> Protein structure file {} not found.".format(cStructureName)
-                    LOGGER.error(error)
-                    raise ValueError(error)
-                cProteinDict["structure"] = cStructureName
-                # Temp end add for RAS-ONLY seperate build using old patches
-                '''
                 cProteinDict["charge"] = -2
                 LOGGER.info("Protein unit {} adding RAS-ONLY for bead id {} full info: {}".format(i, remainig_ids[0], str(cProteinDict)))
             # remove current bead from list
@@ -1467,40 +1438,6 @@ def convert_pf_patch_to_cg_patch(p, simnum):
     LOGGER.info("Lipids outer cons.     = {}".format(str(lipidUpperRatioArray)))
     LOGGER.info("Lipids inner cons.     = {}".format(str(lipidLowerRatioArray)))
     LOGGER.info("Protein units all      = {}".format(proteinUnits))
-
-    ''' @TODO fix this and make it general for RAS and RAF
-    # Select KRAS structures acording to states - pfPatch state to saved files + random value (e.g. 1-1000)
-    # "KRAS-s"+str(cS)+"-r"+str(randint(1, librarySize))+".gro"
-    #librarySize = 1000  # numer of diffrent configurations saved for each state
-    #krasStructs = []
-    for i in range(len(p.rasStates)):
-        cInt = randint(1, librarySize)
-        cState = int(p.rasStates[i])
-        if (cState != 1 and cState != 2):
-            error = "---> KRAS state {} is not supported: ".format(cState)
-            LOGGER.error(error)
-            raise ValueError(error)
-        krasStruct = "{}/random_state{}.{}.KRAS.pbc.mol.gro".format(particlesim.dirKRASStructures, cState, cInt)
-        LOGGER.info("Get KRAS structure file: KRAS # {}, in state {} and rand {}, name {}".format(i, cState, cInt, krasStruct))
-        krasStructs.append(krasStruct)
-
-    # @TODO remove RAS-RAF temp test - NOW this is RAS only campain 1* structs
-    krasStructs = []
-    #krasStruct = particlesim.dirKRASStructures + "/KRAS-04-protein-cg-M22-em-shift.gro"
-    #krasStruct = "/g/g90/helgi/mummi_resources/kras-structures/RAS-RAF-01-fix-shift.gro"
-    structNumber = simnum.split("_")[2] # get XXX number only RAS_RAF_XXX
-    #structPath = "/p/gpfs1/helgi/init_structures_ras_craf/crafForHelgi_2020June20/sel_1000_weight_random"
-    structPath = "/p/gpfs1/helgi/init_structures_ras/converterd"
-    fileMatch = fnmatch.filter(os.listdir(structPath), '{}_*.gro'.format(structNumber))
-    krasStruct = "{}/{}".format(structPath, fileMatch[0])
-    for i in range(len(p.protein_states)):
-        krasStructs.append(krasStruct)
-    #print("s num {} file {}".format(structNumber, krasStruct))
-    ## @TODO remove this - it'shere Make this a none RAS patch:
-    #krasStructs = []
-    #krasPosArray = []
-    #exit()
-    '''
 
     # Add simnum after name, if provided (shoud be empty in MuMMI runs)
     simName=p.id
@@ -1537,11 +1474,6 @@ def convert_pf_patch_to_cg_patch_old_c1(p):
     sumOuter = np.sum(lOuter) / (p.concentrations.shape[0]*p.concentrations.shape[1])
     sumInner = np.sum(lInner) / (p.concentrations.shape[0]*p.concentrations.shape[1])
     asym = np.rint(1600 * (1 - (sumInner / sumOuter))).astype(int)
-
-    # @TODO change this to based on 64 lipids per subpatch (to explore rounding)
-    # @TODO depdning on variations in cons from PF maybe to "proper" pre rounding here ???
-    #old_lOuter = np.rint(64 * lOuter / sumOuter).astype(int)
-    #old_lInner = np.rint(64 * lInner / sumInner).astype(int)
 
     # Compute a probablistic construction of the particles in a cell.
     # We use a cumlative distribution function to
@@ -1790,6 +1722,9 @@ def setup_argparser():
     parser.add_argument("--simnum", type=str, default="",
                         help="Only used in offline runs and testing adds to the end of sim name in some use cases")
 
+    parser.add_argument("--mini", action='store_true',
+                        help="If set we will use mini-MuMMI setting")
+
     return parser
 
 
@@ -1803,8 +1738,9 @@ def store_files(outpath: str, sim_path: str, failure: bool):
 
 def cleanup_files(path: str):
     if path and os.path.exists(path):
-        return # @TODO put this back in commented out for local debug
-        #utils.sys_call(f"rm -r {path}")
+        #return # @TODO put this back in commented out for local debug
+        LOGGER.debug(f"Cleaning up {path}")
+        utils.sys_call(f"rm -r {path}")
 
 
 def sigterm_wrapper(outpath: str, local_path: str):
@@ -1817,6 +1753,222 @@ def sigterm_wrapper(outpath: str, local_path: str):
         os._exit(1)
 
     return sigterm_handler
+
+
+def get_npz_as_gro(coords, fname, gro_ref_file):
+    """
+    Return the coordinates from numpy arrays to gro file on disk
+    """
+    if "mda" not in dir():
+        import MDAnalysis as mda
+
+    # load reference
+    protein = mda.Universe(gro_ref_file)  # read in reference gro file
+    protein.atoms.positions = coords
+    protein.atoms.write(fname)
+
+    return protein
+
+def get_protein_contacts_from_z(ppos, atomids_dict, cutoff, farnesyl_id):
+    """Return an array with protein counts"""
+
+    domains = atomids_dict.keys()
+
+    ncontacts = {}
+    ref_z = ppos[farnesyl_id,2]  # get farnesly height 
+
+    for dom in domains:
+        bead_zs = ppos[atomids_dict[dom].indices,2]
+        diff = np.abs(bead_zs - ref_z)
+        bary = diff <= cutoff
+        ncontacts[dom] = bary.sum()
+
+    return ncontacts
+
+def get_state_from_protein_coordinates(ppos,
+                                       atomids_dict,
+                                       codes_to_state,
+                                       cutoff,
+                                       contacts_threshold,
+                                       farnesyl_id,
+                                       COM_1,
+                                       COM_2):
+    """
+    Return state code for this protein structure.
+
+    checks if we are in state A or B
+
+    cutoff is the z distance to the CYF BB required and contacts_threshold is the
+    number of beads within cutoff required for the domain to be "touching"
+    """
+    M1_domains = ["KD1", "CRD1", "loop11", "loop21", "b1433", "RAS1"]
+    M2_domains = ["KD2", "CRD2", "loop12", "loop22", "RAS2"]
+
+    _M1_dict = {key : atomids_dict[key] for key in M1_domains}
+    _M2_dict = {key : atomids_dict[key] for key in M2_domains}
+
+    # do M1 contacts
+    contacts = get_protein_contacts_from_z(ppos, _M1_dict, cutoff, farnesyl_id[0])
+
+    # make an array of all contacts
+    code1 = ""
+    # now accumulate all the codes into the dictionaries  
+    for dom in M1_domains:
+
+        # we are always assigning RAS to 1
+        if dom == "RAS1":
+            code1 += "1"
+            continue
+
+        if contacts[dom] >= contacts_threshold:
+            code1 += "1"
+        else:
+            code1 += "0"
+
+    # tag this with KD orientation 
+    kdpos = [atomids_dict['KD1'].positions[:,0].mean(),
+             atomids_dict['KD1'].positions[:,1].mean()]
+    crdpos = [atomids_dict['CRD1'].positions[:,0].mean(),
+              atomids_dict['CRD1'].positions[:,1].mean()]
+
+    kdvec = np.array([kdpos[0] - COM_1[0], kdpos[1] - COM_1[1]])
+    crdang = np.arctan2(crdpos[0] - COM_1[0], crdpos[1] - COM_1[1])
+
+    kdrot = np.array([kdvec[0] * np.cos(-crdang) - kdvec[1] * np.sin(-crdang),
+                      kdvec[0] * np.sin(-crdang) + kdvec[1] * np.cos(-crdang)]) 
+
+    ymean = np.arctan2(kdrot[0], kdrot[1])
+
+    if ymean >= 0:
+        ytag = "ypos"
+    else:
+        ytag = "yneg"
+
+    if code1 in codes_to_state.keys():
+        state = code1
+    else:
+        state = "-".join([code1,ytag])
+
+    M1_state = codes_to_state[state]
+
+    # do M2 contacts
+    contacts = get_protein_contacts_from_z(ppos, _M2_dict, cutoff, farnesyl_id[1])
+
+    code2 = ""
+    # now accumulate all the codes into the dictionaries  
+    for dom in M2_domains:
+
+        # we are always assigning RAS to 1
+        if dom == "RAS2":
+            code2 += "1"
+            continue
+
+        if contacts[dom] >= contacts_threshold:
+            code2 += "1"
+        else:
+            code2 += "0"
+
+    # tag this with KD orientation 
+    kdpos = [atomids_dict['KD2'].positions[:,0].mean(),
+             atomids_dict['KD2'].positions[:,1].mean()]
+    crdpos = [atomids_dict['CRD2'].positions[:,0].mean(),
+              atomids_dict['CRD2'].positions[:,1].mean()]
+
+    kdvec = np.array([kdpos[0] - COM_2[0], kdpos[1] - COM_2[1]])
+    crdang = np.arctan2(crdpos[0] - COM_2[0], crdpos[1] - COM_2[1])
+
+    kdrot = np.array([kdvec[0] * np.cos(-crdang) - kdvec[1] * np.sin(-crdang),
+                      kdvec[0] * np.sin(-crdang) + kdvec[1] * np.cos(-crdang)]) 
+
+    ymean = np.arctan2(kdrot[0], kdrot[1])
+
+    if ymean >= 0:
+        ytag = "ypos"
+    else:
+        ytag = "yneg"
+
+    if code2 in codes_to_state.keys():
+        state = code2
+    else:
+        state = "-".join([code2,ytag])
+
+    M2_state = codes_to_state[state]
+
+    return ("_".join(["state",M1_state]), "_".join(["state", M2_state]))
+
+def run_macro_code(prot_state, tmpl_dir, sim_dir, influx=False):
+    """
+    Setup and launch a macro simulaiton using a fixed RAS state.
+    tmlp_dir -> directory in mummi_resources that contains the template files for a macro run
+    sim_dir -> directory in localpath in which to run macro sim 
+    """
+
+    # call subprocess to launch macro
+    # TODO: replace here with flux mini-like call... not using srun / jsrun
+    #utils.sys_call("pushd {}; srun -n4 {}/gridsim2dras run-2Dforce.cfg >> macro_createsims.out  2>&1; popd".format(sim_dir,
+    #                                                                              tmpl_dir))
+    #utils.sys_call("pushd {}; mpirun -np 2 ./gridsim2dras run-2Dforce.cfg >> macro_createsims.out  2>&1; popd".format(sim_dir))
+    #utils.sys_call("flux mini run -n 4 -o mpi=spectrum gridsim2dras run-2Dforce.cfg >> macro_createsims.out  2>&1 ", run_dir=sim_dir)
+    #utils.sys_call('export OMPI_MCA_btl="self"; gridsim2dras run-2Dforce.cfg >> macro_createsims.out  2>&1 ', run_dir=sim_dir)
+    # utils.sys_call('env -i PATH="$PATH"  OMPI_MCA_btl="self" OMPI_COMM_WORLD_RANK=0 OMPI_COMM_WORLD_SIZE=1 gridsim2dras run-2Dforce.cfg >> macro_createsims.out  2>&1', run_dir=sim_dir)
+    if influx:
+        # was -np 1, tried -np 8
+        # utils.sys_call('OMPI_MCA_schizo=^flux OMPI_MCA_pmix=^flux mpirun -np 1 gridsim2dras run-gc.cfg >> macro_createsims.out  2>&1', run_dir=sim_dir)
+        #utils.sys_call('flux run -n1 -c1 gridsim2dras run-gc.cfg >> macro_createsims.out  2>&1', test=True, run_dir=sim_dir) # in current dir
+        utils.sys_call('flux run -n1 -c1 gridsim2dras run-gc.cfg >> macro_createsims.out  2>&1', run_dir=sim_dir)
+        # utils.sys_call2('OMPI_MCA_schizo=^flux OMPI_MCA_pmix=^flux gridsim2dras run-gc.cfg >> macro_createsims.out  2>&1', run_dir=sim_dir)
+        # mpi=none
+    else:
+        #utils.sys_call('/lustre/orion/lrn005/proj-shared/spack/bin/gridsim2dras run-gc.cfg >> macro_createsims.out  2>&1', run_dir=sim_dir) # in current dir
+        utils.sys_call('gridsim2dras run-gc.cfg >> macro_createsims.out  2>&1', test=True, run_dir=sim_dir) # in current dir
+        utils.sys_call('gridsim2dras run-gc.cfg >> macro_createsims.out  2>&1', run_dir=sim_dir) # in current dir
+
+    #utils.sys_call('./gridsim2dras run-gc.cfg >> macro_createsims.out  2>&1', run_dir=sim_dir) # in current dir 
+    #utils.sys_call('/usr/gapps/mummi/lassen/macro-gc/c1-iso/gridsim2dras run-gc.cfg >> macro_createsims.out  2>&1', run_dir=sim_dir) # full path 
+
+    # confirm macro ran and we have output, if not return raise error
+    # use LOGGER.error here.  
+    assert os.path.exists("{}/snapshot.00000001".format(sim_dir)), "Macro code failed to generate outout."
+
+    return
+
+def setup_macro_sim_dir(tldir, sdir, prot_state):
+    """
+    Setup macro simulation.
+
+    prot_state is now a dictionary of parameters:
+    """
+
+    # copy cfg, atom and bonds files to sim dir
+    #utils.sys_call(f"cp {tldir}/bonds.init {sdir}")
+    utils.sys_call(f"cp {tldir}/RASRAF-* {sdir}")
+    utils.sys_call(f"cp {tldir}/run-gc.cfg {sdir}")
+    utils.sys_call(f"cp {tldir}/atoms.init {sdir}")
+    utils.sys_call(f"cp {tldir}/bonds.init {sdir}")
+    utils.sys_call(f"cp {tldir}/cofr-14lips-martini3-0.dat {sdir}")
+    utils.sys_call(f"cp {tldir}/rep12_pot.dat {sdir}")
+
+    #utils.sys_call(f"cp {tldir}/gridsim2dras {sdir}")
+
+    # replace RSEED
+    for i in range(4):
+        utils.sys_call('sed -zi "s/_RSEED/{}/" {}/run-gc.cfg'.format(hex(np.random.randint(2**60)), sdir))
+
+    # replace M1 parameters
+    for i in range(2):
+        utils.sys_call('sed -zi "s/_M1/{}/" {}/atoms.init'.format(prot_state['M1'], sdir))
+    utils.sys_call('sed -zi "s/_X1/{}/" {}/atoms.init'.format(prot_state['X1'], sdir))
+    utils.sys_call('sed -zi "s/_Y1/{}/" {}/atoms.init'.format(prot_state['Y1'], sdir))
+    utils.sys_call('sed -zi "s/_A1/{}/" {}/atoms.init'.format(prot_state['A1'], sdir))
+
+    # replace M2
+    for i in range(2):
+        utils.sys_call('sed -zi "s/_M2/{}/" {}/atoms.init'.format(prot_state['M2'], sdir))
+    utils.sys_call('sed -zi "s/_X2/{}/" {}/atoms.init'.format(prot_state['X2'], sdir))
+    utils.sys_call('sed -zi "s/_Y2/{}/" {}/atoms.init'.format(prot_state['Y2'], sdir))
+    utils.sys_call('sed -zi "s/_A2/{}/" {}/atoms.init'.format(prot_state['A2'], sdir))
+
+    return
 
 
 def main():
@@ -1842,9 +1994,22 @@ def main():
     global gromacs
     global mdrun_o
     global mdrun_mpi
-    gromacs = args.gromacs
+
+    gpu_id = os.environ.get("CUDA_VISIBLE_DEVICES", "UNSET")
+    binding_to_gpu = ""
+    if gpu_id != "UNSET":
+        gpu_id = gpu_id.split(',')
+        if len(gpu_id) > 1:
+            LOGGER.warning(f"Detected more than 1 GPUs per GROMACS {gpu_id}")
+            gpu_id = '-'.join(gpu_id)
+        else:
+            gpu_id = int(gpu_id[0])
+        # On Frontier there is one L3 cache per GPU
+        binding_to_gpu = f"hwloc-bind $(hwloc-calc L3:{gpu_id}) -- "
+
+    gromacs = f"{binding_to_gpu} {args.gromacs}"
     mdrun_o = args.mdrunopt
-    mdrun_mpi = args.mpi
+    mdrun_mpi = f"{binding_to_gpu} {args.mpi}"
 
     # If no mpi mdrun given use default gromacs mdrun
     if (len(mdrun_mpi) < 1):
@@ -1859,14 +2024,15 @@ def main():
     fstype = args.fstype
     inpath = args.inpath
     patchName = args.patch
-    outpath = args.outpath
-    localpath = args.outlocal
+    outpath = args.outpath  # this is gpfs path
+    localpath = args.outlocal  # this is localdisk path
+    mini_mummi = args.mini # True if we use Mini MuMMI
 
     # Show options
     LOGGER.info("Running createsims, options are:")
     LOGGER.info(args)
     LOGGER.info("GROMACS       = {}".format(gromacs))
-    LOGGER.info("GROMACS single precision path " + shutil.which(gromacs))
+    LOGGER.info("GROMACS single precision path " + str(shutil.which(args.gromacs)))
     LOGGER.info("mdrun_o       = {}".format(mdrun_o))
     LOGGER.info("mdrun_mpi     = {}".format(mdrun_mpi))
     LOGGER.info("init outpath  = {}".format(outpath))
@@ -1876,10 +2042,14 @@ def main():
     simpath = outpath if not localpath else localpath
     # Set up the SIGTERM handler
     signal.signal(signal.SIGTERM, sigterm_wrapper(outpath, simpath))
+    signal.signal(signal.SIGINT, sigterm_wrapper(outpath, simpath))
+    signal.signal(signal.SIGUSR1, sigterm_wrapper(outpath, simpath))
+    signal.signal(signal.SIGUSR2, sigterm_wrapper(outpath, simpath))
 
     # @TODO This statement is to kill existing GROMACS runs on the node. This is
     # a temporary fix for flux overscheduling to some ranks.
-    utils.sys_call('pkill gmx_mpi*', return_codes=[0,1])
+    # @TODO removed as we definitly can't kill gmx as many creatsims or cganalysis running on the same note
+    #utils.sys_call('pkill gmx_mpi*', return_codes=[0,1])
 
     # Initilize ouput DBR/files etc
     iointerface = mummi_ras.get_io(fstype)
@@ -1917,7 +2087,7 @@ def main():
         elif (patchName[:6] == "create"):
             # This method is for creating specific types of simulations - both hardcoded and from comand line
             LOGGER.info("Create CG patch based on {} with name {}".format(patchName, args.simnum))
-            patchSim = creat_cg_patch(patchName[6:].strip(), args.simnum)
+            patchSim = creat_cg_patch(patchName[6:].strip(), args.simnum, mini_mummi)
         elif (patchName[:8] == "test_raw"):
             LOGGER.info("Testing raw patch '%s'", patchName)
             ppath = "/p/gpfs1/bhatia4/pilot2/campaign1star/patches_37"
@@ -1925,12 +2095,551 @@ def main():
             patch_concentrations, patch_rstates, patch_rpositions = read_patches_from_combined(ppath, pids)
             #patchSim = convert_macro_to_cg_patch("rawpatch_1062730", patch_concentrations[0], patch_rstates[0], patch_rpositions[0])
             patchSim = convert_macro_to_cg_patch("rawpatch_1062730", patch_concentrations[0], patch_rstates, patch_rpositions)
+
+        elif (patchName[0:9] == "structure_pc3"):    # This is what was used for "structure_pc3" in Pilot 2 pre-campaing3
+
+            # -------------------------------------
+            # files and directories needed
+            # -------------------------------------
+
+            # temporary directory to run macro code. 
+            macro_sim_dir = os.path.join(localpath, "macro_sim_dir")
+            # location of macro template
+            #tmpl_dir = os.path.join(Naming.dir_res('macro'), "createsim_template")
+            os.path.join(Naming.dir_res('macro_c2'))
+            # location to write gro file from npz input
+            gro_file = os.path.join(localpath,"struct_createsim.gro")
+            # ml absolute input path
+            inPathInteration=os.path.join(inpath, patchName.split('_')[1])
+
+            # look up a reference gro file from the library 
+            gro_ref = os.path.join(Naming.dir_res('structures'),
+                                   "RAS-RAF",
+                                   "RAS-RAF_state_ma_0.gro")
+
+            # should make an isolated sub dir in localpath in which to write gro and run macro sim
+            os.makedirs(macro_sim_dir, exist_ok=True)
+
+            struct = iointerface.load_npz(inPathInteration, [patchName])[0]["data"]
+
+            # convert npz to gro and write to disk
+            if "mda" not in dir():
+                import MDAnalysis as mda
+
+            # load reference
+            _prot = mda.Universe(gro_ref)  # read in reference gro file
+            _prot.atoms.positions = struct
+            _prot.atoms.write("struct_createsim_init.gro")
+
+            # instatiate an MDanalysis universe for analysing gro etc
+            #kras_indices = mummi_ras.online.cg.get_tiltrot_z_state_multiple.get_protein_info(_prot,'resname ACE1 and name BB')
+            _kr_indx = _prot.select_atoms('resname ACE1 and name BB')
+            kras_indices = [(k.resid, 'RAS-RAF') for k in _kr_indx]
+            statesList = mummi_ras.online.cg.get_tiltrot_z_state_multiple.getKRASstates(_prot, kras_indices)
+
+            # hardcode state here, will eventually need routine to determine this from gro file:
+            # import this library from RAS states? --> could test
+            # coded: 1 -> ma
+            #        2 -> mb
+            #        3 -> za
+
+            # hardcode this to RASRAF 
+            _statenames = {1 : "mRASa_mRAFa",
+                           2 : "mRASb_mRAFb",
+                           3 : "zRASa_zRAFa"}
+
+            _state_index = statesList[0][0][-1]
+            state = _statenames[_state_index]
+
+            # set up macro simulation dir
+            # run this on outlocal where Mummi holds temp local files
+            # should make an isolated sub dir in localpath. 
+            setup_macro_sim_dir(tmpl_dir, macro_sim_dir, state)
+
+            # launch macro job
+            run_macro_code(state, tmpl_dir, macro_sim_dir, influx=True)
+            # breakpoint()
+
+            # pulls out the last state from from the above run
+            p = fetch_gc_patches(localpath, "macro_sim_dir_000000000001", "simple")
+
+            # sets coordinates in patchSim 
+            patchSim = convert_gc_patch_to_cg_patch(p, args.simnum, localpath)
+
+            # Pre-Campaign 3 specific - Fix rotation of protein 
+            _protBB = _prot.select_atoms('name BB') # only one protein in pre-campaign 3
+            RESIDXS_GDOMAIN = np.arange(0, 165, dtype=int)
+            RESIDXS_CRD_4B = np.array([276,277,278,279, 289,290,291,292])
+            RESIDXS_FARNESYL_4B = np.array([183])
+
+            resids = ' '.join([str(i) for i in RESIDXS_GDOMAIN])
+            com_GDOMAIN = _protBB.select_atoms(f'resid {resids}').center_of_mass()
+            resids = ' '.join([str(i) for i in RESIDXS_CRD_4B])
+            com_CRD_4B = _protBB.select_atoms(f'resid {resids}').center_of_mass()
+            resids = ' '.join([str(i) for i in RESIDXS_FARNESYL_4B])
+            com_FARNESYL_4B = _protBB.select_atoms(f'resid {resids}').center_of_mass()
+            LOGGER.info("Pre-campaign3 - set rotation: gdomain = {} A, crd_4B = {} A, farnesyl = {} A".format(com_GDOMAIN, com_CRD_4B, com_FARNESYL_4B))
+
+            dxy = np.array([com_GDOMAIN[0], com_GDOMAIN[1], 0])
+            dvec = com_CRD_4B - com_GDOMAIN
+            angle = np.rad2deg(np.arctan2(dvec[1], dvec[0]))
+            LOGGER.info("Pre-campaign3 - rotate by angle  = {}".format(angle))
+
+            # rotate
+            _prot.atoms.translate(-dxy)
+            _prot.atoms.rotateby(-angle, [0.,0.,1.], point=[0,0,0])
+            _prot.atoms.translate(dxy)
+
+            # translate z-axes to correct location (somewhat below the membrane)
+            #_prot.atoms.translate([0, 0, com_FARNESYL_4B[2] - (10*5.455)]) - not needed was old 
+
+            # Pre-Campaign 3 specific - Change protein location from RAS G-domain to farnesyl (Note, MDAnalysis is in A, macro model in nm) 
+            patchSim.proteinUnits[0]["position"] = [patchSim.proteinUnits[0]["position"][0] - (com_GDOMAIN[0] - com_FARNESYL_4B[0]) / 10, patchSim.proteinUnits[0]["position"][1] - (com_GDOMAIN[1] - com_FARNESYL_4B[1]) / 10]
+
+            # back to normal stuff (before pre-campaign 3) 
+            _prot.atoms.write(gro_file)
+            patchSim.proteinUnits[0]["structure"] = gro_file
+            # enforce that it's always of type "RAS-RAF"
+            patchSim.proteinUnits[0]["type"] = "RAS-RAF"
+
+        elif (patchName[0:9] == "structure_c2_mini"):
+            # this is for C2 and mini_mummi - change back to e.g. "structure" and modify C3 below
+
+            # convert npz to gro and write to disk
+            if "mda" not in dir():
+                import MDAnalysis as mda
+
+            # location to write gro file from npz input
+            gro_file = os.path.join(localpath,"struct_createsim.gro")
+            # ml absolute input path
+            inPathInteration = os.path.join(inpath, patchName.split('_')[1])
+            gro_input = inPathInteration + "/" + patchName + ".gro"
+
+            if not os.path.exists(gro_input):
+                LOGGER.warning(f"File {gro_input} does not exist.")
+                gro_input = patchName + ".gro"
+                if not os.path.exists(gro_input):
+                    raise ValueError(f"File {gro_input} does not exist. Aborting")
+
+
+            LOGGER.info(f"Read in generated input structure after healing = {gro_input}")
+            _prot = mda.Universe(gro_input)
+
+            if mini_mummi:
+                LOGGER.info(f"Setting up patch {patchName} in mini-MuMMI style")
+                patchSim = creat_cg_patch("", "RAS_RAF", mini_mummi)
+                # Update FF parameters
+                added_mdp_options = " -DACYM280"
+                patchSim.proteinUnits[0]["ff_options"] = added_mdp_options # note these are used in .mdp files to change the protein FF parameters
+                # Change protein name 
+                patchSim.proteinUnits[0]["structure"] = f"{patchName}.gro" # assuming file is copied into sim dir
+                _prot.atoms.write(gro_file)
+                patchSim.proteinUnits[0]["structure"] = gro_file
+            else:
+                # -------------------------------------
+                # files and directories needed
+                # -------------------------------------
+
+                # temporary directory to run macro code. 
+                # location of macro template
+                tmpl_dir = Naming.dir_res('macro_c2')
+                # look up a reference gro file from the library 
+                gro_ref = os.path.join(Naming.dir_res('ref_structures'), "ras-raf-14-3-3-ref-CG.gro")
+                macro_sim_dir = os.path.join(localpath, "macro_sim_dir")
+
+                # should make an isolated sub dir in localpath in which to write gro and run macro sim
+                if not os.path.exists(macro_sim_dir):
+                    LOGGER.info(f"macro_sim_dir not found. Creating a new directory on {localpath}")
+                    utils.sys_call(f"mkdir {macro_sim_dir}")
+
+                # load reference
+                #_prot = mda.Universe(gro_ref)  # read in reference gro file
+                #_prot.atoms.positions = struct 
+                #_prot.atoms.write("struct_createsim_init.gro")
+
+                # load generated healead .gro file directly 
+
+
+                # The stucte posistion are from the .npz - ML generated before healing run so don't use
+                #struct = iointerface.load_npz(inPathInteration, [patchName])[0]["data"]
+                #_prot.atoms.positions = struct 
+
+                # Check structure for needed FF changes
+                added_mdp_options = ""
+                # zn_cutoff returns True if it is close enough to coordiante (B state)
+                if zn_cutoff(_prot, 8, patchName):
+                    added_mdp_options += " -DACYM280"
+                # 365 cutoff returns True if it is far enough away to not be bound (B state)
+                if SEP365_cutoff(_prot, 8, patchName):
+                    added_mdp_options += " -DASEP365"
+
+                inBstate = zn_cutoff(_prot, 8, patchName) and SEP365_cutoff(_prot, 8, patchName)
+
+                # canonical ordering of domains for B state
+                domains_dict = {"KD": _prot.select_atoms('index 1136 to 1768'),
+                                "CRD": _prot.select_atoms('index 637 to 740'),
+                                "loop1": _prot.select_atoms('index 753 to 928'),
+                                "loop2": _prot.select_atoms('index 955 to 1135'),
+                                "b1433": _prot.select_atoms('index 2358 to 2896'),
+                                "RAS": _prot.select_atoms('index 0 to 437')}
+
+                """
+                Ordering for domainsi n A state.
+                domains_dict = {"KD" : _prot.select_atoms('index 1136 to 1768'),
+                                "loop2" : _prot.select_atoms('index 955 to 1135'),
+                                "b1433" : _prot.select_atoms('index 2358 to 2896'),
+                                "RAS" : _prot.select_atoms('index 0 to 437')}
+                """
+
+
+                # this is for B state classification only
+                codes_to_state = {"000001": "a",
+                                "000011": "a",
+                                "000101": "a",
+                                "000111": "a",
+                                "010001": "b",
+                                "010011": "b",
+                                "010101": "b",
+                                "010111": "b",
+                                "100001-ypos": "c",
+                                "100011-ypos": "c",
+                                "100101-ypos": "c",
+                                "100111-ypos": "c",
+                                "110001-ypos": "d",
+                                "110011-ypos": "d",
+                                "110101-ypos": "d",
+                                "110111-ypos": "d",
+                                "100001-yneg": "e",
+                                "100011-yneg": "e",
+                                "100101-yneg": "e",
+                                "100111-yneg": "e",
+                                "110001-yneg": "f",
+                                "110011-yneg": "f",
+                                "110101-yneg": "f",
+                                "110111-yneg": "f",
+                                "001001": "g",
+                                "001011": "g",
+                                "001101": "g",
+                                "001111": "g",
+                                "011001": "b",
+                                "011011": "b",
+                                "011101": "b",
+                                "011111": "b",
+                                "101001-ypos": "i",
+                                "101011-ypos": "i",
+                                "101101-ypos": "i",
+                                "101111-ypos": "i",
+                                "111001-ypos": "d",
+                                "111011-ypos": "d",
+                                "111101-ypos": "d",
+                                "111111-ypos": "d",
+                                "101001-yneg": "k",
+                                "101011-yneg": "k",
+                                "101101-yneg": "k",
+                                "101111-yneg": "k",
+                                "111001-yneg": "f",
+                                "111011-yneg": "f",
+                                "111101-yneg": "f",
+                                "111111-yneg": "f"}
+
+                state = get_state_from_protein_coordinates(_prot.atoms.positions,
+                                                           domains_dict,
+                                                           codes_to_state,
+                                                           15,
+                                                           5,
+                                                           430)  # farnesyl id is hardcoded as BB
+
+                setup_macro_sim_dir(tmpl_dir, macro_sim_dir, state)
+
+                # launch macro job
+                run_macro_code(state, tmpl_dir, macro_sim_dir, influx=True) # True for Frontier right now (April 2025)
+
+                # pulls out the last state from from the above run
+                p = fetch_gc_patches(localpath, "macro_sim_dir_000000000001", "simple")
+
+                # sets coordinates in patchSim 
+                patchSim = convert_gc_patch_to_cg_patch(p, args.simnum, localpath)
+
+                # Pre-Campaign 3 specific - Fix rotation of protein 
+                _protBB = _prot.select_atoms('name BB') # only one protein in pre-campaign 3
+                # Martini 2 - pre-campaign 3 numbers 
+                '''
+                RESIDXS_GDOMAIN = np.arange(0, 165, dtype=int)
+                RESIDXS_CRD_4B = np.array([276,277,278,279, 289,290,291,292])
+                RESIDXS_FARNESYL_4B = np.array([183])
+                resids = ' '.join([str(i) for i in RESIDXS_GDOMAIN])
+                com_GDOMAIN = _protBB.select_atoms(f'resid {resids}').center_of_mass()
+                resids = ' '.join([str(i) for i in RESIDXS_CRD_4B])
+                com_CRD_4B = _protBB.select_atoms(f'resid {resids}').center_of_mass()
+                resids = ' '.join([str(i) for i in RESIDXS_FARNESYL_4B])
+                com_FARNESYL_4B = _protBB.select_atoms(f'resid {resids}').center_of_mass()
+                '''
+
+                # Martini 3 - campaign 3 indexes
+                com_GDOMAIN = _protBB.select_atoms('index 0 to 380').center_of_mass() # should be KRAS G-domain 
+                com_CRD_4B = _protBB.select_atoms('index 649 to 660 or index 685 to 694').center_of_mass() # this is resid 241 to 244 (THR, PHE, PHE, THR) and resid 254 to 257 (LUE LEU PHE GLN) - CRD membrane interacting part
+                com_FARNESYL_4B = _protBB.select_atoms('index 430 to 431').center_of_mass() # should be BB of CYF resnum 185 in KRAS 
+                LOGGER.info("M3 - set rotation: gdomain = {} A, crd_4B = {} A, farnesyl = {} A".format(com_GDOMAIN, com_CRD_4B, com_FARNESYL_4B))
+
+                dxy = np.array([com_GDOMAIN[0], com_GDOMAIN[1], 0])
+                dvec = com_CRD_4B - com_GDOMAIN
+                angle = np.rad2deg(np.arctan2(dvec[1], dvec[0]))
+                LOGGER.info("M3 - rotate by angle  = {}".format(angle))
+
+                # rotate
+                _prot.atoms.translate(-dxy)
+                _prot.atoms.rotateby(-angle, [0.,0.,1.], point=[0,0,0])
+                _prot.atoms.translate(dxy)
+
+                # M3 specific - Change protein location from RAS G-domain to farnesyl (Note, MDAnalysis is in A, macro model in nm) 
+                newx = patchSim.proteinUnits[0]["position"][0] - (com_GDOMAIN[0] - com_FARNESYL_4B[0])/10
+                newy = patchSim.proteinUnits[0]["position"][1] - (com_GDOMAIN[1] - com_FARNESYL_4B[1])/10
+                patchSim.proteinUnits[0]["position"] = [newx, newy]
+                LOGGER.info("M3 - x,y location shifted to FAR BB, now is = {}".format(patchSim.proteinUnits[0]["position"]))
+
+                # translate z-axes to correct location (somewhat below the membrane) - we want CYF BB to be at -5.455 nm a little below the membrane
+                # transkate protein x,y of CYF BB to the correct location (same as lipid location given to insane) 
+                #_prot.atoms.translate([com_FARNESYL_4B[0] - 10*newx, com_FARNESYL_4B[1] - 10*newy,  (-1*com_FARNESYL_4B[2]) - (10*5.455)]) 
+                _prot.atoms.translate([10*newx - com_FARNESYL_4B[0], 10*newy - com_FARNESYL_4B[1],  10*5.455 - com_FARNESYL_4B[2]])
+
+                LOGGER.info("M3 - farnesyl location after centering should be ({},{},5.455) and is {}".format(newx, newy, _protBB.select_atoms('index 430 to 431').center_of_mass()/10))
+
+                # back to normal stuff (before pre-campaign 3) 
+                _prot.atoms.write(gro_file)
+                patchSim.proteinUnits[0]["structure"] = gro_file
+                # enforce that it's always of type "RAS-RAF"
+                patchSim.proteinUnits[0]["type"] = "RAS_RAF_14_3_3"
+                # and set charge - note can also be done above but here overwirtten 
+                patchSim.proteinUnits[0]["charge"] = -11 # Note insane cacluates the charge but not corectly so this is the offset to get the charge = 0 - actual protein charge is -7
+                patchSim.proteinUnits[0]["ff_options"] = added_mdp_options # note these are used in .mdp files to change the protein FF parameters
+
+
+        elif (patchName[0:9] == "structure"):
+            # New for ADMIRRAL C3 - note C2 and mini MuMMI are above 
+
+            # Get ML generated structure 
+            inPathInteration = os.path.join(inpath, patchName.split('_')[1]) # ML input + iter dir 
+            gro_input = inPathInteration + "/" + patchName + ".gro" # absolute input path
+            if not os.path.exists(gro_input):
+                LOGGER.warning(f"File {gro_input} does not exist.")
+                gro_input = patchName + ".gro"
+                if not os.path.exists(gro_input):
+                    raise ValueError(f"File {gro_input} does not exist. Aborting")
+
+            LOGGER.info(f"Read in generated input structure after healing = {gro_input}")
+            if "mda" not in dir():
+                import MDAnalysis as mda
+            _prot = mda.Universe(gro_input)
+            _protBB = _prot.select_atoms('name BB') 
+            #_prot.atoms.write("test1.gro")
+
+            # temporary directory to run macro code. 
+            # location of macro template
+            tmpl_dir = Naming.dir_res('macro_c3')
+            macro_sim_dir = os.path.join(localpath, "macro_sim_dir")
+
+            # should make an isolated sub dir in localpath in which to write gro and run macro sim
+            if not os.path.exists(macro_sim_dir):
+                LOGGER.info(f"macro_sim_dir not found. Creating a new directory on {localpath}")
+                utils.sys_call(f"mkdir {macro_sim_dir}")
+
+            # Check structure for needed FF changes
+            # In C3 zn_cutoff and SEP365_cutoff always true (lags set but function not checked)
+            added_mdp_options = ""
+            # zn_cutoff returns True if it is close enough to coordiante (B state)
+            #if zn_cutoff(_prot, 8, patchName):
+            if True:
+                added_mdp_options += " -DACYM280"
+            # 365 cutoff returns True if it is far enough away to not be bound (B state)
+            #if SEP365_cutoff(_prot, 8, patchName):
+            if True:
+                added_mdp_options += " -DASEP365"
+            # Get C3 states 
+            combination = patchName.split('_')[3]
+            if combination[0] == 'Y':
+                added_mdp_options += " -DM1DIM"
+            if combination[1] == 'Y':
+                added_mdp_options += " -DM2DIM"
+            if combination[2] == 'Y':
+                added_mdp_options += " -DM1M2E"
+            if combination[3] == 'Y':
+                added_mdp_options += " -DM21433"
+            LOGGER.info(f"Options to be added to .mdp file {added_mdp_options}")
+
+            # zero center m1 FAR and align m2 FAR to x-axes 
+            com_m1_FARNESYL_4B = _protBB.select_atoms('index 430 to 431').center_of_mass() # should be BB of CYF resnum 185 in m1 KRAS 
+            com_m2_FARNESYL_4B = _protBB.select_atoms('index 3327 to 3328').center_of_mass() # should be BB of CYF resnum 185 in m2 KRAS 
+            _prot.atoms.translate(-1 * com_m1_FARNESYL_4B)
+            dvec = com_m2_FARNESYL_4B - com_m1_FARNESYL_4B
+            angle = np.rad2deg(np.arctan2(dvec[1], dvec[0]))
+            _prot.atoms.rotateby(-angle, [0.,0.,1.], point=[0,0,0])
+            #_prot.atoms.write("test2.gro")
+
+            # center to box middle 
+            com_m1_FARNESYL_4B = _protBB.select_atoms('index 430 to 431').center_of_mass() # should be BB of CYF resnum 185 in m1 KRAS 
+            com_m2_FARNESYL_4B = _protBB.select_atoms('index 3327 to 3328').center_of_mass() # should be BB of CYF resnum 185 in m2 KRAS 
+            xadd = 410/2 - (com_m2_FARNESYL_4B[0] - com_m1_FARNESYL_4B[0]) / 2 
+            yadd = 410/2 
+            zadd = 10*5.455 # Note this is default inital offset shoudl not be needed  
+            # translate z-axes to correct location (somewhat below the membrane) - we want CYF BB to be at -5.455 nm a little below the membrane            
+            _prot.atoms.translate((xadd, yadd, zadd))
+            #_prot.atoms.write("test3.gro")
+
+            # Get protein posisions for macro model 
+            com_m1_GDOMAIN = _protBB.select_atoms('index 0 to 380').center_of_mass() # should be KRAS G-domain 
+            com_m1_CRD_4B = _protBB.select_atoms('index 649 to 660 or index 685 to 694').center_of_mass() # this is resid 241 to 244 (THR, PHE, PHE, THR) and resid 254 to 257 (LUE LEU PHE GLN) - CRD membrane interacting part
+            com_m1_FARNESYL_4B = _protBB.select_atoms('index 430 to 431').center_of_mass() # should be BB of CYF resnum 185 in KRAS 
+            com_m2_GDOMAIN = _protBB.select_atoms('index 2897 to 3277').center_of_mass() # should be KRAS G-domain 
+            com_m2_CRD_4B = _protBB.select_atoms('index 3546 to 3557 or index 3582 to 3591').center_of_mass() # this is resid 241 to 244 (THR, PHE, PHE, THR) and resid 254 to 257 (LUE LEU PHE GLN) - CRD membrane interacting part
+            com_m2_FARNESYL_4B = _protBB.select_atoms('index 3327 to 3328').center_of_mass() # should be BB of CYF resnum 185 in KRAS 
+            dvec = com_m1_CRD_4B - com_m1_GDOMAIN
+            angle_m1 = np.rad2deg(np.arctan2(dvec[1], dvec[0]))
+            dvec = com_m2_CRD_4B - com_m2_GDOMAIN
+            angle_m2 = np.rad2deg(np.arctan2(dvec[1], dvec[0]))
+            LOGGER.info(f'Protein far post, com_m1_FARNESYL_4B = {com_m1_FARNESYL_4B}, com_m2_FARNESYL_4B = {com_m2_FARNESYL_4B}')
+            LOGGER.info(f'Protein pos for macro model, com_m1_GDOMAIN = {com_m1_GDOMAIN}, angle_m1 = {angle_m1}, com_m2_GDOMAIN = {com_m2_GDOMAIN}, angle_m2 = {angle_m2}')
+
+            # Note, need to change below here for C3 macro model 
+            inBstate = True
+
+            # canonical ordering of domains for B state
+            domains_dict = {"KD1": _prot.select_atoms('index 1136 to 1768'),
+                            "CRD1": _prot.select_atoms('index 637 to 740'),
+                            "loop11": _prot.select_atoms('index 753 to 928'),
+                            "loop21": _prot.select_atoms('index 955 to 1135'),
+                            "b1433": _prot.select_atoms('index 2358 to 2896'),
+                            "RAS1": _prot.select_atoms('index 0 to 437'),
+                            "KD2": _prot.select_atoms('index 4034 to 4664'),
+                            "CRD2": _prot.select_atoms('index 3535 to 3638'),
+                            "loop12": _prot.select_atoms('index 3651 to 3826'),
+                            "loop22": _prot.select_atoms('index 3853 to 4033'),
+                            "RAS2": _prot.select_atoms('index 2898 to 3335')}
+
+            # this is for B state classification only
+            codes_to_state = {"000001": "a",
+                              "000011": "a",
+                              "000101": "a",
+                              "000111": "a",
+                              "010001": "b",
+                              "010011": "b",
+                              "010101": "b",
+                              "010111": "b",
+                              "100001-ypos": "c",
+                              "100011-ypos": "c",
+                              "100101-ypos": "c",
+                              "100111-ypos": "c",
+                              "110001-ypos": "d",
+                              "110011-ypos": "d",
+                              "110101-ypos": "d",
+                              "110111-ypos": "d",
+                              "100001-yneg": "e",
+                              "100011-yneg": "e",
+                              "100101-yneg": "e",
+                              "100111-yneg": "e",
+                              "110001-yneg": "f",
+                              "110011-yneg": "f",
+                              "110101-yneg": "f",
+                              "110111-yneg": "f",
+                              "001001": "g",
+                              "001011": "g",
+                              "001101": "g",
+                              "001111": "g",
+                              "011001": "b",
+                              "011011": "b",
+                              "011101": "b",
+                              "011111": "b",
+                              "101001-ypos": "i",
+                              "101011-ypos": "i",
+                              "101101-ypos": "i",
+                              "101111-ypos": "i",
+                              "111001-ypos": "d",
+                              "111011-ypos": "d",
+                              "111101-ypos": "d",
+                              "111111-ypos": "d",
+                              "101001-yneg": "k",
+                              "101011-yneg": "k",
+                              "101101-yneg": "k",
+                              "101111-yneg": "k",
+                              "111001-yneg": "f",
+                              "111011-yneg": "f",
+                              "111101-yneg": "f",
+                              "111111-yneg": "f",
+                              "00001": "a_Bstar",
+                              "00011": "a_Bstar",
+                              "01001": "b_Bstar",
+                              "01011": "b_Bstar",
+                              "10001-ypos": "c_Bstar",
+                              "10011-ypos": "c_Bstar",
+                              "11001-ypos": "d_Bstar",
+                              "11011-ypos": "d_Bstar",
+                              "10001-yneg": "e_Bstar",
+                              "10011-yneg": "e_Bstar",
+                              "11001-yneg": "f_Bstar",
+                              "11011-yneg": "f_Bstar",
+                              "00101": "g_Bstar",
+                              "00111": "g_Bstar",
+                              "01101": "b_Bstar",
+                              "01111": "b_Bstar",
+                              "10101-ypos": "i_Bstar",
+                              "10111-ypos": "i_Bstar",
+                              "11101-ypos": "d_Bstar",
+                              "11111-ypos": "d_Bstar",
+                              "10101-yneg": "k_Bstar",
+                              "10111-yneg": "k_Bstar",
+                              "11101-yneg": "f_Bstar",
+                              "11111-yneg": "f_Bstar"}
+
+            # protein atom indexes go as M1 is 0 to 2897 inclusive, then M2 is 2898 to 4716
+            states_M12 = get_state_from_protein_coordinates(_prot.atoms.positions,
+                                                            domains_dict,
+                                                            codes_to_state,
+                                                            15,
+                                                            5,
+                                                            [430,3327], 
+                                                            com_m1_GDOMAIN,
+                                                            com_m2_GDOMAIN)  # farnesyl id is hardcoded as BB
+
+
+            state = {"M1" : states_M12[0],
+                     "X1" : com_m1_GDOMAIN[0], 
+                     "Y1" : com_m1_GDOMAIN[1], 
+                     "A1" : angle_m1,
+                     "M2" : states_M12[1],
+                     "X2" : com_m2_GDOMAIN[0], 
+                     "Y2" : com_m2_GDOMAIN[1], 
+                     "A2" : angle_m2}
+
+            setup_macro_sim_dir(tmpl_dir, macro_sim_dir, state)
+
+            # launch macro job
+            run_macro_code(state, tmpl_dir, macro_sim_dir, influx=True) # False for Frontier right now
+
+            # pulls out the last state from from the above run
+            p = fetch_gc_patches(localpath, "macro_sim_dir_000000000001", "simple")
+
+            # sets coordinates in patchSim 
+            patchSim = convert_gc_patch_to_cg_patch(p, args.simnum, localpath)
+
+            # remove superfluos 2nd ras
+            if len(patchSim.proteinUnits) > 1:
+                patchSim.proteinUnits = [patchSim.proteinUnits[0]]
+
+            patchSim.proteinUnits[0]["position"] = [com_m1_FARNESYL_4B[0]/10, com_m1_FARNESYL_4B[1]/10]
+            patchSim.proteinUnits[0]["position_m2"] = [com_m2_FARNESYL_4B[0]/10, com_m2_FARNESYL_4B[1]/10] # new in C3 for m2 FAR location 
+            # location to write gro file from npz input
+            gro_file = os.path.join(localpath,"struct_createsim.gro")
+            _prot.atoms.write(gro_file)
+            patchSim.proteinUnits[0]["structure"] = gro_file
+            patchSim.proteinUnits[0]["type"] = "dimercomp" # Full complex RAS-RAF (m1) 14-3-3^2 RAS-RAF (m2)
+            patchSim.proteinUnits[0]["charge"] = -4 # Note insane cacluates the charge but not corectly so this is the offset to get the charge = 0
+            patchSim.proteinUnits[0]["ff_options"] = added_mdp_options # note these are used in .mdp files to change the protein FF parameters
+
         else:
             error = "createsims was called with -p {} - value not supported".format(patchName)
             LOGGER.error(error)
             raise ValueError(error)
 
-        # If outpath no set (default in MuMMI) get full paths
+        # If outpath not set (default in MuMMI) get full paths
         if outpath == "":
             outpath = Naming.dir_sim('cg', simname=patchSim.name)
             LOGGER.info("Output path not set for patch '%s', setting to '%s'", patchSim.name, outpath)
@@ -1946,8 +2655,8 @@ def main():
         if os.path.isdir(outpath):
             if iointerface.test_signal(outpath, flag_success):
                 LOGGER.warning("---> FOUND previous sim setup with sim name {} and marked success, will exit".format(patchSim.name))
-                #iointerface.send_signal(outpath, flag_success)  # no need for this!
-                exit()
+                marked_failure = False
+                exit() # We jump directly to finally block
             else:
                 # This should be the normal behavior in MuMMI - but check if there is unexpected files in the folder
                 # We do expect at least the current log file
@@ -1960,7 +2669,7 @@ def main():
         else:
             # This should not happen in a MuMMI run as folder is created by worfklow (and log of this file stored there)
             # This is allowed due to testing
-            LOGGER.warning("---> Sim {} folder didn't excist and was created - this is not expected within a MuMMI run".format(outpath))
+            LOGGER.warning("---> Sim {} folder didn't exist and was created - this is not expected within a MuMMI run".format(outpath))
             utils.sys_call('mkdir -p ' + outpath, test=False)
 
         LOGGER.info("Creating PG Particle simulation...")
@@ -1969,13 +2678,17 @@ def main():
         if p != None:
             # This is saved locally (local node) in current woking dir and then coped to gloabl file system at the end
             pfPatch.save_npz("ppatch.npz", p)
-        setup_cg_sim(patchSim, simpath)
+
+        setup_cg_sim(patchSim, simpath, mini_mummi)
 
         LOGGER.info("Running conversion from GROMACS to ddcMD...")
         prime_cg_sim(patchSim, simpath)
 
-        # Setup successfull
-        iointerface.send_signal(outpath, flag_success)
+        # Setup success
+        if iointerface.test_signal(outpath, flag_failure):
+            LOGGER.warning(f"Trying to set flag to success ({flag_success}) and found an already existing failure flag ({flag_failure}).")
+        else:
+            iointerface.send_signal(outpath, flag_success)
         marked_failure = False
         LOGGER.info("---> Createsims finish successfully for sim {}".format(patchSim.name))
 
@@ -2006,23 +2719,29 @@ def main():
     finally:
         # Was an error that didn't get cought in an Exception
         if marked_failure:
-            LOGGER.error("---> In creatsim finally but din't reach success - most likely a gromacs error/exit.")
-            iointerface.send_signal(outpath, flag_failure)
+            LOGGER.error("---> In createsim finally but din't reach success - most likely a gromacs error/exit.")
+            if iointerface.test_signal(outpath, flag_success):
+                LOGGER.warning(f"Trying to set flag ({outpath}) to failure ({flag_failure}) and found an already existing success flag ({flag_success}). Aborting.")
+            else:
+                iointerface.send_signal(outpath, flag_failure)
         # Copy back from local and cleanup
         try:
             LOGGER.info("---> Copied form local to global - {}/* {}/".format(simpath, outpath))
             store_files(outpath, simpath, marked_failure)
+            LOGGER.info("---> Copy to {} completed.".format(outpath))
             cleanup_files(localpath)
         except Exception as error:
-            # @TODO - add better error handling and saving of creatsims_error file if always faital
+            # @TODO - add better error handling and saving of createsims_error file if always fatal
             LOGGER.error("---> ERROR in copying form local to global. {}".format(error))
             # For now don't delete local
             #if localpath != "":
             #    utils.sys_call("rm -r {}".format(simpath))
-            iointerface.send_signal(outpath, flag_failure)
+            if iointerface.test_signal(outpath, flag_success):
+                LOGGER.warning(f"Got error: trying to set flag to failure ({flag_failure}) and found an already existing success flag ({flag_success}).")
+            else:
+                iointerface.send_signal(outpath, flag_failure)
             cleanup_files(localpath)
             raise error
-
 
 if __name__ == "__main__":
     main()

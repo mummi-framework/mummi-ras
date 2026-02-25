@@ -1,0 +1,91 @@
+job_type: cg
+
+config:
+  bundle_size: 1
+
+  jobname:    cganalysis
+  jobdesc:    CGAnalysis ({}).
+
+  nnodes:     1
+  nprocs:     1
+  cores per task: 6 # 6 frontier / 3 summit / 5 on lassen
+  ngpus:      1
+
+  # If this job is nested (run inside batch ob)
+  nested: True
+
+imports:  # possibly needed for any evals
+  - mummi_ras
+
+variables:
+  simname: null # value supplied by jobTracker
+  timestamp: null # value supplied by jobTracker
+  outpath:
+    eval: mummi_ras.Naming.dir_sim('cg', '{simname}')
+  locpath:
+    eval: mummi_ras.Naming.dir_local('cg/{simname}')
+  fbpath:
+    eval: mummi_ras.Naming.dir_root('feedback-cg')
+  outfile: 'cg_analysis.out'
+
+script: |
+  export OMPI_COMM_WORLD_RANK=1
+  export OMP_NUM_THREADS=6
+
+  spack load gromacs~mpi+mummi-c2 arch=$(spack arch)
+
+  simname={simname}
+  outpath={outpath}
+  locpath={locpath}
+  fbpath={fbpath}
+  outfile={outfile}
+
+  echo ">> simname  = $simname"
+  echo ">> outpath  = $outpath"
+  echo ">> locpath  = $locpath"
+  echo ">> fbpath   = $fbpath"
+  echo ">> gmx      =" $(command -v gmx)
+  echo ">> pwd      =" $(pwd)
+  echo ">> hostname =" $(hostname)
+  
+  mkdir -p $locpath; cd $locpath
+
+  cp $outpath/topol.tpr                             $locpath/
+  cp $outpath/lipids-water-eq6.gro                  $locpath/
+  cp $outpath/state.cpt                             $locpath/ 2>/dev/null
+  cp $outpath/traj_comp.xtc                         $locpath/ 2>/dev/null
+  cp $outpath/ener.edr                              $locpath/ 2>/dev/null
+  cp $outpath/md.log                                $locpath/ 2>/dev/null
+  cp $outpath/mdrun.log                             $locpath/ 2>/dev/null
+  cp $outpath/cg_analysis.log                       $locpath/ 2>/dev/null
+  cp $outpath/cg_analysis.out                       $locpath/ 2>/dev/null
+  cp -P $outpath/restart                            $locpath/ 2>/dev/null
+  cp $(readlink -f $outpath/restart)                $locpath/ 2>/dev/null  
+
+  # if we found some XTC then we take the most recent
+  xtclast=$(ls --color=none $outpath/traj_comp.step*.xtc | sort -r | head -n 1 2>/dev/null)
+  if [ -z $xtclast ]; then  
+    cframe=0
+  else
+    cframe=$(echo $(basename $xtclast) | tr -d -c 0-9)
+    cp $xtclast                            $locpath/
+  fi
+  echo ">> xtclast = $xtclast, cframe = $cframe"
+
+  $(LAUNCHER) sh -c "mummi_cganalysis \
+                      --simname $simname \
+                      --path $locpath \
+                      --pathremote $outpath \
+                      --siminputs $outpath \
+                      --fstype mummi \
+                      --fbio mummi \
+                      --simbin gmx \
+                      --backend GROMACS_PARTS \
+                      --simcores 6 \
+                      --nprocs 1 \
+                      --stopsimtime 50 \
+                      --simruntime -1 \
+                      --logstdout \
+                      --loglevel 2 \
+                      --mini \
+                      --fcount $cframe >> $outfile 2>&1"

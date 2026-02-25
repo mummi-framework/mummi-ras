@@ -3,7 +3,6 @@ maestro:
   env:
   config:
   batch:
-    type:    flux
-    host:    summit
-    #args:
-    #    mpi: spectrum   # not needed anymore for new flux
+    type:    flux-async # Only for hacky way from Loic to submit faster jobs (require specific maestrowf from https://github.com/lpottier/maestrowf/tree/feature/async-flux)
+    # type:    flux # Normal Maestrowf
+    host:    frontier

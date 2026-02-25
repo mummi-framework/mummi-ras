@@ -132,7 +132,7 @@ def get_ref_kras():
 # Load inital ref frames (only need to do this once)
 ref0 = get_ref_kras()
 
-def getKRASstates(u,kras_indices):
+def getKRASstates(u,kras_indices, lipids_exist=False):
     """Gets states for all KRAS proteins in path."""
 
 #     res_shift = 8
@@ -216,7 +216,13 @@ def getKRASstates(u,kras_indices):
                                                  str(start_of_g+zshifting+278)+':'+str(start_of_g+zshifting+281)+' ' +\
                                                  ' and (name CA or name BB)')
 ############### NEED TO CONFIRM THE SELECTION OF THE RAF LOOP RESIDUES ABOVE ####################
-            diff = (lipids.center_of_mass()[2]-raf_loops_selection.center_of_mass(unwrap=True)[2])/10
+            if lipids_exist:
+                diff = (lipids.center_of_mass()[2]-raf_loops_selection.center_of_mass(unwrap=True)[2])/10
+            else:
+                # use farnesyl position as substitue for lipid COM
+                farn_pos = u.select_atoms('resname CYF and name BB')
+                #diff = (farn_pos[0].position[2]-raf_loops_selection.center_of_mass(unwrap=True)[2])/10 + 1.8 # adding fixed correction to classify state
+                diff = (farn_pos[0].position[2]-raf_loops_selection.center_of_mass()[2])/10 + 1.8 # adding fixed correction to classify state
             if diff < 0:
                 diff = diff+(u.dimensions[2]/10)
             z_pos.append(diff)

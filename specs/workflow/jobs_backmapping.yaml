@@ -32,8 +32,8 @@ variables:
 
 script: |
 
-  spack load gromacs@2019.6.mummifix+double
-  spack load gromacs@2019.6.mummifix~double
+  spack load gromacs@2019.6.mummifix+double target=$(spack arch --target)
+  spack load gromacs@2019.6.mummifix~double target=$(spack arch --target)
 
   patch={patch}
   frame={frame}

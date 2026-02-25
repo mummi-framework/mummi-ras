@@ -165,7 +165,7 @@ class MacroParser:
         assert np.isclose(header['h'][0], header['h'][4])
         PSIZE = header['h'][0]
 
-        positions = data[:, 2:].astype(np.float)
+        positions = data[:, 2:].astype(float)
         if positions[:,:2].min() < 0 or positions[:,:2].max() > PSIZE:
             positions[:,:2] -= (PSIZE * np.floor(positions[:,:2] / PSIZE))
 
@@ -290,17 +290,17 @@ class MacroParser:
         assert isinstance(bonds, bytes)
 
         # ----------------------------------------------------------------------
-        #LOGGER.debug('parsing atoms')
+        LOGGER.debug('parsing atoms')
         ah,ad = MacroParser._parse_stream(atoms,
                                           MACRO_FIELDS_ATOMS, MACRO_FIDXS_ATOMS,
                                           MacroParser._process_header_atoms,
                                           MacroParser._process_data_atoms, f'{sim_name}-atoms')
-        #LOGGER.debug('parsing bonds')
+        LOGGER.debug('parsing bonds')
         bh,bd = MacroParser._parse_stream(bonds,
                                           MACRO_FIELDS_BONDS, MACRO_FIDXS_BONDS,
                                           MacroParser._process_header_bonds,
                                           MacroParser._process_data_bonds, f'{sim_name}-bonds')
-        #LOGGER.debug('parsing densities')
+        LOGGER.debug('parsing densities')
         dh,dd = MacroParser._parse_stream(densities,
                                           MACRO_FIELDS_DENSITIES, MACRO_FIDXS_DENSITIES,
                                           MacroParser._process_header_densities,

@@ -43,7 +43,7 @@ def test_packaging(mod, submods):
 if __name__ == '__main__':
     mname = 'mummi_ras'
     modules = ['datastructures', 'feedback', 'interfaces', 'ml', 'online',
-               'parsers', 'transformations', 'workflow',
+               'parsers', 'transformations', 'workflow', 'ucg',
                'online.aa', 'online.cg']
 
     test_packaging(mname, modules)

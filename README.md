@@ -1,5 +1,5 @@
-## MuMMI RAS v1.0
-#### Released: Jun 29, 2022
+## MuMMI RAS v2.0
+#### Released: Feb 24, 2026
 
 <b>MuMMI RAS</b> is the application component of the <b>MuMMI framework</b>
 developed to create large-scale ML-driven multiscale simulation ensembles to
@@ -45,33 +45,39 @@ citations to relevant papers.
    [doi:10.1145/3295500.3356197](https://doi.org/10.1145/3295500.3356197).
    <br/><b><i>Best Paper at SC 2019</i></b>.
 
+3. Pottier et al. <b>Machine Learning-driven Multiscale MD Workflows: The Mini-MuMMI Experience</b>.
+   To Appear in Springer Nature, Biomolecular Simulations - Methods in Molecular Biology, 2026.
+   [doi:10.48550/arXiv.2507.07352](https://doi.org/10.48550/arXiv.2507.07352).
+
 ##### Overall framework and Biology Results
 
-3. Ingólfsson et al. <b>Machine Learning-driven Multiscale Modeling Reveals Lipid-Dependent Dynamics of RAS Signaling Protein</b>.
+4. Ingólfsson et al. <b>Machine Learning-driven Multiscale Modeling Reveals Lipid-Dependent Dynamics of RAS Signaling Protein</b>.
    Proceedings of the National Academy of Sciences (PNAS),  vol. 119, issue 1, number e2113297119. 2022.
    [doi:10.1073/pnas.2113297119](https://doi.org/10.1073/pnas.2113297119).
 
-4. Ingólfsson et al. <b>Machine Learning-driven Multiscale Modeling, bridging the scales with a next generation simulation infrastructure</b>.
-  Under review, 2022.
+5. Ingólfsson et al. <b>Machine Learning-driven Multiscale Modeling, bridging the scales with a next generation simulation infrastructure</b>.
+Journal of Chemical Theory and Computation 2023 Vol. 19 Issue 9 Pages 2658-2675.
+[doi:10.1021/acs.jctc.2c01018](https://doi.org/10.1021/acs.jctc.2c01018).
+
 
 ##### Individual components (ML, simulations, transformations, etc.)
 
-5. Bhatia et al. <b>Machine Learning Based Dynamic-Importance Sampling for Adaptive Multiscale Simulations</b>.
+6. Bhatia et al. <b>Machine Learning Based Dynamic-Importance Sampling for Adaptive Multiscale Simulations</b>.
     Nature Machine Intelligence, vol. 3, pp. 401–409, May 2021.
     [doi:10.1038/s42256-021-00327-w](https://doi.org/10.1038/s42256-021-00327-w).
 
-6. Zhang et al. <b>ddcMD: A fully GPU-accelerated molecular dynamics program for the Martini force field</b>. Journal of Chemical Physics, vol. 153, issue 4, 2021.
+7. Zhang et al. <b>ddcMD: A fully GPU-accelerated molecular dynamics program for the Martini force field</b>. Journal of Chemical Physics, vol. 153, issue 4, 2021.
   [doi:10.1063/5.0014500](https://doi.org/10.1063/5.0014500).
 
-7. Bhatia et al. <b>A Biology-Informed Similarity Metric for Simulated Patches of Human Cell Membrane</b>.
+8. Bhatia et al. <b>A Biology-Informed Similarity Metric for Simulated Patches of Human Cell Membrane</b>.
       Under Review, 2022.
 
-8. Stanton et al. <b>Dynamic Density Functional Theory of Multicomponent Cellular Membranes</b>. Under Review, 2022. Available on [arXiv](https://arxiv.org/abs/2112.08651v1).
+9. Stanton et al. <b>Dynamic Density Functional Theory of Multicomponent Cellular Membranes</b>. Under Review, 2022. Available on [arXiv](https://arxiv.org/abs/2112.08651v1).
 
-9. López et al. <b>Asynchronous Reciprocal Coupling of Martini 2.2 Coarse-Grained and CHARMM36 All-Atom Simulations in an Automated Multiscale Framework</b>.
+10. López et al. <b>Asynchronous Reciprocal Coupling of Martini 2.2 Coarse-Grained and CHARMM36 All-Atom Simulations in an Automated Multiscale Framework</b>.
     Under Review, 2022.
 
-10. Nguyen et al. <b>Exploring CRD mobility during RAS/RAF engagement at the membrane</b>.
+11. Nguyen et al. <b>Exploring CRD mobility during RAS/RAF engagement at the membrane</b>.
     Under Review, 2022.
 
 #### Installation
@@ -92,24 +98,25 @@ with Los Alamos National Laboratory, Oak Ridge National Laboratory, and Internat
 list of main contributors is given below.
 
 * <b>LLNL</b>:
-Harsh Bhatia, Francesco Di Natale, Helgi I Ingólfsson, Joseph Y Moon,
+Loïc Pottier, Helgi I Ingólfsson, Jeremy Tempkin, Konstantia Georgouli, Fikret Aydin, Harsh Bhatia, Francesco Di Natale, Joseph Y Moon,
 Xiaohua Zhang, Joseph R Chavez, Fikret Aydin, Tomas Oppelstrup, Timothy S Carpenter,
 Shiv Sundaram, Gautham Dharuman, Dong H Ahn, Stephen Herbein, Tom Scogland,
-Peer-Timo Bremer, and James N Glosli.   
+Peer-Timo Bremer, and James N Glosli.
 
 * <b>LANL</b>:
-Chris Neale and Cesar Lopez
+Chris Neale and Cesar Lopez.
 
 * <b>ORNL</b>:
-Chris Stanley
+Chris Stanley.
 
 * <b>IBM</b>:
-Sara K Schumacher
+Sara K Schumacher.
 
 
 MuMMI was funded by the Pilot2 project led by Dr. Fred Streitz (DOE) and
-Dr. Dwight Nissley (NIH). We acknowledge contributions from the entire
-Pilot 2 team.
+Dr. Dwight Nissley (NIH). After Pilot 2 ended, MuMMI was funded as part of the
+Artificial-Intelligence-Driven Multiscale Investigation of the RAS/RAF Activation Lifecycle ([ADMIRRAL](https://computational.cancer.gov/about/admirral)) project led by Dr. Fred Streitz (DOE) and Dr. Dwight Nissley (NIH).
+We acknowledge contributions from the entire Pilot 2 and ADMIRRAL team.
 
 This work was performed under the auspices of the U.S. Department of Energy (DOE) by Lawrence Livermore National Laboratory under Contract DE-AC52-07NA27344, Los Alamos National Laboratory (LANL) under Contract DE-AC5206NA25396, and Oak Ridge National Laboratory under Contract DE-AC05-00OR22725.
 
@@ -123,4 +130,8 @@ Contributions may be made through pull requests and/or issues on github.
 
 MuMMI RAS is distributed under the terms of the MIT License.
 
-Livermore Release Number: LLNL-CODE-827655
+All new contributions must be made under the MIT license.
+
+SPDX-License-Identifier: MIT
+
+LLNL-CODE-2015414

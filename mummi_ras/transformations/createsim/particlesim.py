@@ -1,8 +1,15 @@
-###############################################################################
-# @todo add Pilot2-splash-app disclaimer
+#!/usr/bin/env python3
+# -----------------------------------------------------------------------------
+# Copyright (c) 2024, Lawrence Livermore National Security, LLC. All rights
+# reserved. LLNL-CODE-827655. This work was produced at the Lawrence Livermore
+# National Laboratory (LLNL) under contract no. DE-AC52-07NA27344 (Contract 44)
+# between the U.S. Department of Energy (DOE) and Lawrence Livermore National
+# Security, LLC (LLNS) for the operation of LLNL.  See license for disclaimers,
+# notice of U.S. Government Rights and license terms and conditions.
+#
 # @authors  Helgi I. Ingolfsson <ingolfsson1@llnl.gov>
 #           Changhoan Kim <kimchang@us.ibm.com>
-###############################################################################
+# -----------------------------------------------------------------------------
 
 """A particle simulation instance - keeps track of what is in the simulation and all the sub-simulations."""
 
@@ -32,8 +39,8 @@ pSimSubPatchFileUpper = "psimSubPatch_upper.pat"
 pSimSubPatchFileLower = "psimSubPatch_lower.pat"
 lGridName = "lipid_counts.npz"
 
-dirddcMD = Naming.dir_res('ddcMD')  # dirResources+"ddcMD/"
-dirMartini = Naming.dir_res('martini')  # dirResources+"Martini/"
+dirddcMD = Naming.dir_res('ddcMD-martini3')  # dirResources+"ddcMD/"
+dirMartini = Naming.dir_res('martini3')  # dirResources+"Martini/" -> change to Martini 3 files 
 dirCHARMM = Naming.dir_res('charmm')  # dirResources+"CHARMM/"
 dirKRASStructures = Naming.dir_res('structures')  # dirResources+"KRAS-structures/"
 
@@ -44,7 +51,7 @@ class ParticleSim:
 
 
     def __init__(self, lipidTypes, lipidUpperRatioArray, lipidLowerRatioArray, lipidSuPatches=[1, 1],
-                 proteinUnits=[], asym=0, simName="", lipidFullAsignment=False):
+                 proteinUnits=[], asym=0, simName="", lipidFullAsignment=False, mini_mummi=False):
         """
         Initialize the ParticleSimulation - only modify the default values where nessisary.
 
@@ -72,6 +79,7 @@ class ParticleSim:
         self.rasPos = [] # not used anymore, np.asarray(rasPos)
         self.proteinUnits = proteinUnits
         self.asym = asym
+        self.mini_mummi = mini_mummi
 
         if len(lipidTypes) != self.lipidUpperRatioArray.shape[1] or len(lipidTypes) != self.lipidLowerRatioArray.shape[1]:
             error = "lipidTypes and lipidRatios (upper and lower) need to be of same length"
@@ -85,14 +93,28 @@ class ParticleSim:
             raise AttributeError(error)
 
         # Set default params
-        # Sim size - for production use  31x31 nm or 3200 lipids (1600,1600 - 40x40 per leaflet
+        if self.mini_mummi:
+            # Adm mini-MuMMI small sized patch 
+            self.sizeX = 20
+            self.sizeY = 20
+            self.sizeZ = 15
+        else:
+            # Adm-C2 Sim size - for production use  41x41 nm or 5618 lipids (2809,2809 - 53x53 per leaflet)
+            self.sizeX = 41
+            self.sizeY = 41
+            self.sizeZ = 20
+        # Note after bilayer eq this will change to ~avg 37.7 x 37.7 x 22.4
+        # WARNING this is still to little in some cases and those simulations should be marked and stopped 
+
+        # ols Sim size - for production use  31x31 nm or 3200 lipids (1600,1600 - 40x40 per leaflet
         #  - this will support x25 8x8 lipid subpatches)
-        self.sizeX = 31  # For small 450 lipid sims use 12 (some old test sims used 15.5)
-        self.sizeY = 31  # For small 450 lipid sims use 12 (some old test sims used 15.5)
-        self.sizeZ = 16  # use 13 for Martini 3 (less gap between protein and bilayer) used 12 for bilayer only sims
+        #self.sizeX = 31  # For small 450 lipid sims use 12 (some old test sims used 15.5)
+        #self.sizeY = 31  # For small 450 lipid sims use 12 (some old test sims used 15.5)
+        #self.sizeZ = 18  # For M3 KARS-BRAF-14-3-3 use 18 - WARNING this is still to little in some cases and those simulations should be marked and stopped 
         self.ioncons = 0.15  # 150 mM NaCl
         self.water = "W"  # Use PW for polirizable and WN for Martini3 normal water
-        self.defTopFile = "system-cg-default-M2.top"  # Alt system-cg-default-M2PW.top or system-cg-default-M3.top
+        #self.defTopFile = "system-cg-default-M2.top"  # Alt system-cg-default-M2PW.top or system-cg-default-M3.top
+        self.defTopFile = "system-cg-default-M3.top"  # Alt system-cg-default-M2PW.top or system-cg-default-M3.top
 
         # Default names for RAS and RAS-RAF Martini parameters - 4B and 4A
         self.defrasItp = "{}/RAS_scfix-CYFpos".format(dirMartini)  # New scfix RAS for C3
