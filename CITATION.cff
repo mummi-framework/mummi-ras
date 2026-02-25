@@ -1,0 +1,61 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it the Mini-MuMMI paper as below."
+type: software
+title: "Machine Learning-driven Multiscale MD Workflows: The Mini-MuMMI Experience"
+authors:
+  - family-names: "Pottier"
+    given-names: "Loïc"
+    orcid: "https://orcid.org/0000-0002-7681-3521"
+  - family-names: "Georgouli"
+    given-names: "Konstantia"
+    orcid: "https://orcid.org/0000-0002-3903-5812"
+  - family-names: "Carpenter"
+    given-names: "Timothy S."
+    orcid: "https://orcid.org/0000-0001-7848-9983"
+  - family-names: "Aydin"
+    given-names: "Fikret"
+    orcid: "https://orcid.org/0000-0003-3237-8043"
+  - family-names: "Tempkin"
+    given-names: "Jeremy O. B."
+    orcid: "https://orcid.org/0000-0002-1602-6649"
+  - family-names: "Nissley"
+    given-names: "Dwight V."
+    orcid: "https://orcid.org/0000-0001-7523-116X"
+  - family-names: "Streitz"
+    given-names: "Frederick H."
+    orcid: "https://orcid.org/0000-0003-0924-037X"
+  - family-names: "Scogland"
+    given-names: "Thomas R. W."
+    orcid: "https://orcid.org/0000-0001-7234-5743"
+  - family-names: "Bremer"
+    given-names: "Peer-Timo"
+    orcid: "https://orcid.org/0000-0003-4107-3831"
+  - family-names: "Lightstone"
+    given-names: "Felice C."
+    orcid: "https://orcid.org/0000-0003-1465-426X"
+  - family-names: "Ingólfsson"
+    given-names: "Helgi I."
+    orcid: "https://orcid.org/0000-0002-7613-9143"
+doi: "10.48550/arxiv.2507.07352"
+date-released: "2025-07-10"
+url: "https://arxiv.org/abs/2507.07352"
+repository-code: "https://github.com/mummi-framework"
+abstract: >
+  Computational models have become one of the prevalent methods to model complex phenomena.
+  To accurately model complex interactions, such as detailed biomolecular interactions,
+  scientists often rely on multiscale models comprised of several internal models operating
+  at difference scales, ranging from microscopic to macroscopic length and time scales.
+  Bridging the gap between different time and length scales has historically been challenging
+  but the advent of newer machine learning (ML) approaches has shown promise for tackling
+  that task. Here, we discuss the massively parallel Multiscale Machine-Learned Modeling
+  Infrastructure (MuMMI) and introduce a novel curated version called "mini-MuMMI", designed
+  to run on modest HPC systems or even laptops, demonstrating utility by exploring RAS-RAF
+  membrane interactions.
+keywords:
+  - multiscale simulation
+  - molecular dynamics
+  - machine learning
+  - HPC workflows
+  - MuMMI
+  - RAS-RAF
+license: MIT
