@@ -13,20 +13,16 @@
 import torch
 import numpy as np
 
-# Typing
-from torch import Tensor
-from typing import List, Tuple, Optional, Union, Any
-
 
 class V_Generator:
-    def __init__(self, seed: Optional[int] = None):
+    def __init__(self, seed: int | None = None):
         if seed is not None:
             self.rng_gen = torch.Generator()
             self.rng_gen.manual_seed(seed)
         else:
             self.rng_gen = None
 
-    def generate(self, num_interp_points: int, num_samples_per_interp_point: int) -> Tensor:
+    def generate(self, num_interp_points: int, num_samples_per_interp_point: int) -> torch.Tensor:
         stddev = torch.tensor([4, 4, 4, 10]).view(1, 1, 4)
         gaussian_noises = torch.randn(1, num_samples_per_interp_point, 4, generator=self.rng_gen) * stddev
 

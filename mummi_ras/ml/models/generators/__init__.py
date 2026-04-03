@@ -8,6 +8,6 @@
 # notice of U.S. Government Rights and license terms and conditions.
 # ------------------------------------------------------------------------------
 
-from .c3.v import V_Generator
-from .c3.ucg import V2UCG_Generator
-from .c3.cg import UCG2CG_Generator
+from .c3.v_generator import V_Generator
+from .c3.ucg_generator import V2UCG_Generator
+from .c3.cg_generator import UCG2CG_Generator
