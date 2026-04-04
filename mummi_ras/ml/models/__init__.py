@@ -9,7 +9,7 @@
 # ------------------------------------------------------------------------------
 
 from .autoencoders import FullDenseAutoencoder, FullMiniDenseAutoencoder, HierarchicalCGAutoencoder
-from .generatives import V_Generator, V2UCG_Generator, UCG2CG_Generator
+from .generators import V_Generator, V2UCG_Generator, UCG2CG_Generator
 
 import glob
 import logging

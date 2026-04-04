@@ -46,6 +46,14 @@ dependencies = [
     "theano==1.0.5",
 ]
 
+[project.optional-dependencies]
+rasdiff = [
+    "torch>=2.7.1",
+    "lightning",
+    "tensorboard",
+    "torch_geometric",
+]
+
 [project.scripts]
 mummi_aaanalysis = "mummi_ras.online.aa.aa_analysis:main"
 mummi_backmapping = "mummi_ras.transformations.backmapping.backmapping:main"

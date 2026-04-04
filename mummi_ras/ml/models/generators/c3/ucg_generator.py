@@ -13,12 +13,11 @@
 import torch
 import numpy as np
 from torch import nn, Tensor
-from .basis import GaussianRandomFourierFeatures
-from .diffusion import VariancePreservingDiffuser
-from .transformer import TransformerEncoderContinuousRoPE, TransformerEncoderLayerContinuousRoPE
+from .modules.basis import GaussianRandomFourierFeatures
+from .modules.diffusion import VariancePreservingDiffuser
+from .modules.transformer import TransformerEncoderContinuousRoPE, TransformerEncoderLayerContinuousRoPE
 from scipy.spatial.transform import Rotation
 
-# TODO: switch to using only 'lightning'
 try:
     import lightning as L
     from lightning.pytorch.utilities import grad_norm
